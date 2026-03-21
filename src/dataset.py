@@ -180,9 +180,9 @@ class SingleTatoebaDataset(Dataset):
     
 
 class TatoebaDataset(Dataset):
-    def __init__(self, folder_path, encoder=None):
+    def __init__(self, folder_path, shuffle=True, encoder=None):
         all_tsv_paths = glob.glob(f'{folder_path}/*tsv')
-        self.single_datasets = [SingleTatoebaDataset(tsv_path, encoder) for tsv_path in all_tsv_paths]
+        self.single_datasets = [SingleTatoebaDataset(tsv_path=tsv_path, shuffle=shuffle, encoder=encoder) for tsv_path in all_tsv_paths]
         self.flat_index = [(dataset_index, data_index) 
                            for dataset_index, single_dataset in  enumerate(self.single_datasets) 
                            for data_index in range(len(single_dataset))]
