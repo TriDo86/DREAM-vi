@@ -1,0 +1,26 @@
+# configs/train.yaml
+# All hyperparameters in one place.
+# Override any value via CLI: python scripts/train.py --epochs 50 --lr 1e-5
+
+model:
+  backbone:      "sentence-transformers/LaBSE"   # swap for mBERT / XLM-R-large
+  embedding_dim: 768     # LaBSE / mBERT = 768, XLM-R-large = 1024
+
+data:
+  train_dir:    "data/Tatoeba_Train"
+  val_dir:      "data/Tatoeba_Val"
+  batch_size:   512
+  encode_batch: 64       # batch size for backbone.encode() during pre-computation
+  num_workers:  4
+
+trainer:
+  epochs:        100
+  learning_rate: 1.0e-4
+  weight_decay:  0.0     # paper uses plain Adam with no WD
+  patience:      15      # early stopping patience (epochs)
+  min_delta:     1.0e-4
+  checkpoint_dir: "checkpoints"
+  save_every:    5       # save a rolling checkpoint every N epochs
+  keep_last_k:   3       # keep only the K most recent rolling checkpoints
+  device:        "cuda"  # "cuda" | "cpu" | "mps"
+  seed:          42

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.so
+.venv/
+venv/
+env/
+
+# Data & models (too large for git)
+data/
+checkpoints/
+*.pt
+*.bin
+*.safetensors
+
+# Notebooks output
+notebooks/.ipynb_checkpoints/
+
+# Env
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WandB
+wandb/
