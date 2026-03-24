@@ -49,6 +49,10 @@ class TrainerConfig:
     learning_rate: float = 1e-4
     weight_decay:  float = 0.0    # paper uses plain Adam with no weight decay
 
+
+    # ── reproducibility ──────────────────────────────────────────
+    seed: int = 86
+
     # ── early stopping ───────────────────────────────────────────
     patience:   int   = 15
     min_delta:  float = 1e-4
@@ -59,7 +63,9 @@ class TrainerConfig:
     keep_last_k:    int = 3   # keep only the K most recent rolling checkpoints
 
     # ── hardware ─────────────────────────────────────────────────
-    device: str = "cuda"    # "cuda" | "cpu" | "mps"
+    device: str = field(
+        default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -85,11 +91,16 @@ class EarlyStopping:
 
     def step(self, val_loss: float) -> bool:
         if val_loss < self._best - self.min_delta:
-            self._best   = val_loss
+            self._best    = val_loss
             self._counter = 0
             return False
         self._counter += 1
-        logger.debug(f"EarlyStopping: no improvement for {self._counter}/{self.patience} epochs.")
+
+        logger.debug(
+            "EarlyStopping: no improvement for %d/%d epochs.",
+            self._counter,
+            self.patience,
+        )
         return self._counter >= self.patience
 
 
@@ -109,11 +120,7 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader   = val_loader
         self.cfg          = cfg
-
-        # Resolve device: fall back to CPU if CUDA is requested but unavailable
-        self.device = torch.device(
-            cfg.device if (cfg.device != "cuda" or torch.cuda.is_available()) else "cpu"
-        )
+        self.device = torch.device(cfg.device)
         self.model.to(self.device)
 
         self.optimizer = torch.optim.Adam(
@@ -137,10 +144,11 @@ class Trainer:
     def fit(self) -> None:
         """Run training from `_start_epoch` to `cfg.epochs`."""
         logger.info(
-            f"Training on {self.device} | "
-            f"epochs={self.cfg.epochs} | "
-            f"lr={self.cfg.learning_rate} | "
-            f"patience={self.cfg.patience}"
+            "Training on %s | epochs=%d | lr=%g | patience=%d",
+            self.device,
+            self.cfg.epochs,
+            self.cfg.learning_rate,
+            self.cfg.patience,
         )
 
         for epoch in range(self._start_epoch, self.cfg.epochs + 1):
@@ -151,16 +159,15 @@ class Trainer:
             train_lc = self._train_epoch()
             val_lc   = self._val_epoch()
 
-            self._log(epoch, train_lc, val_lc)
+            is_best = val_lc.total.item() < self._best_val_loss
+            self._log(epoch, train_lc, val_lc, is_best=is_best)
 
             # ── WandB (un-comment to activate) ──────────────────────────────
-            # import wandb
-            # wandb.log({"epoch": epoch,
-            #            **train_lc.as_log_dict("train/"),
-            #            **val_lc.as_log_dict("val/")})
+            import wandb
+            wandb.log({"epoch": epoch,
+                       **train_lc.as_log_dict("train/"),
+                       **val_lc.as_log_dict("val/")})
 
-            # Checkpoint: always save best
-            is_best = val_lc.total.item() < self._best_val_loss
             if is_best:
                 self._best_val_loss = val_lc.total.item()
                 self._save(epoch, tag="best")
@@ -171,7 +178,7 @@ class Trainer:
                 self._prune_rolling()
 
             if self.early_stopping.step(val_lc.total.item()):
-                logger.info(f"Early stopping triggered at epoch {epoch}.")
+                logger.info("Early stopping triggered at epoch %d.", epoch)
                 break
 
     def resume(self, checkpoint_path: str | Path) -> None:
@@ -181,14 +188,17 @@ class Trainer:
         The checkpoint must have been created by this Trainer (i.e. contain
         the keys 'model_state', 'optimizer_state', 'epoch', 'best_val_loss').
         """
-        ckpt = torch.load(checkpoint_path, map_location=self.device)
+        ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(ckpt["model_state"])
         self.optimizer.load_state_dict(ckpt["optimizer_state"])
         self._start_epoch   = ckpt["epoch"] + 1
         self._best_val_loss = ckpt.get("best_val_loss", float("inf"))
+
         logger.info(
-            f"Resumed from '{checkpoint_path}' "
-            f"(epoch={ckpt['epoch']}, best_val={self._best_val_loss:.4f})"
+            "Resumed from '%s' (epoch=%d, best_val=%.4f)",
+            checkpoint_path,
+            ckpt["epoch"],
+            self._best_val_loss,
         )
 
     # ------------------------------------------------------------------
@@ -253,15 +263,24 @@ class Trainer:
     # Private: logging / checkpointing
     # ------------------------------------------------------------------
 
-    def _log(self, epoch: int, train: LossComponents, val: LossComponents) -> None:
+    def _log(
+        self,
+        epoch: int,
+        train: LossComponents,
+        val:   LossComponents,
+        *,
+        is_best: bool = False,
+    ) -> None:
+        
         logger.info(
-            f"Epoch {epoch:4d} | "
-            f"train={train.total.item():.4f} "
-            f"(R={train.reconstruction.item():.3f} "
-            f"M={train.meaning.item():.3f} "
-            f"L={train.language.item():.3f}) | "
-            f"val={val.total.item():.4f}"
-            + (" ★" if val.total.item() < self._best_val_loss else "")
+            "Epoch %4d | train=%.4f (R=%.3f M=%.3f L=%.3f) | val=%.4f%s",
+            epoch,
+            train.total.item(),
+            train.reconstruction.item(),
+            train.meaning.item(),
+            train.language.item(),
+            val.total.item(),
+            " ★" if is_best else "",
         )
 
     def _save(self, epoch: int, tag: str) -> Path:
@@ -278,7 +297,8 @@ class Trainer:
             },
             path,
         )
-        logger.info(f"  Checkpoint saved → {path}")
+
+        logger.info("  Checkpoint saved → %s", path)
         return path
 
     def _prune_rolling(self) -> None:
@@ -286,7 +306,7 @@ class Trainer:
         epoch_ckpts = sorted(self.ckpt_dir.glob("dream_epoch_*.pt"))
         for old in epoch_ckpts[: -self.cfg.keep_last_k]:
             old.unlink(missing_ok=True)
-            logger.debug(f"  Pruned old checkpoint: {old.name}")
+            logger.debug("  Pruned old checkpoint: %s", old.name)
 
 
 # ---------------------------------------------------------------------------
@@ -297,20 +317,23 @@ class _Accumulator:
     """Accumulates LossComponents over batches, returns per-batch mean."""
 
     def __init__(self) -> None:
-        self._total = self._rec = self._mean = self._lang = 0.0
+        self._total:          float = 0.0
+        self._reconstruction: float = 0.0
+        self._meaning:        float = 0.0
+        self._language:       float = 0.0
 
     def update(self, lc: LossComponents) -> None:
-        self._total += lc.total.item()
-        self._rec   += lc.reconstruction.item()
-        self._mean  += lc.meaning.item()
-        self._lang  += lc.language.item()
+        self._total          += lc.total.item()
+        self._reconstruction += lc.reconstruction.item()
+        self._meaning        += lc.meaning.item()
+        self._language       += lc.language.item()
 
     def mean(self, n: int) -> LossComponents:
         def t(v: float) -> torch.Tensor:
             return torch.tensor(v / n)
         return LossComponents(
             total=t(self._total),
-            reconstruction=t(self._rec),
-            meaning=t(self._mean),
-            language=t(self._lang),
+            reconstruction=t(self._reconstruction),
+            meaning=t(self._meaning),
+            language=t(self._language),
         )

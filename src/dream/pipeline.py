@@ -31,6 +31,9 @@ import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
 
 from .model import DREAMModel
+from .dataset import DEFAULT_LANGUAGE_MAP
+
+_NUM_LANGUAGES = len(DEFAULT_LANGUAGE_MAP)
 
 # Default backbone used during training
 _DEFAULT_BACKBONE = "sentence-transformers/LaBSE"
@@ -60,14 +63,15 @@ class DREAMPipeline:
         self.device = torch.device(device)
 
         # ── Backbone (frozen) ─────────────────────────────────────────────
+        self.backbone_name = backbone_name
         self.backbone = SentenceTransformer(backbone_name, device=str(self.device))
         self.backbone.eval()
         embedding_dim = self.backbone.get_sentence_embedding_dimension()
 
         # ── DREAM head ────────────────────────────────────────────────────
-        num_languages = 8  # default; overridden by checkpoint if available
+        num_languages = _NUM_LANGUAGES
         if checkpoint_path is not None:
-            ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+            ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
             num_languages = ckpt.get(
                 "num_languages",
                 ckpt["model_state"]["language_identifier.weight"].shape[0],
@@ -153,6 +157,7 @@ class DREAMPipeline:
 
         return meaning.cpu().float().numpy()
 
+    @torch.no_grad()
     def similarity(self, sentence_a: str, sentence_b: str) -> float:
         """
         Cosine similarity between two sentences (cross-lingual aware).
@@ -166,6 +171,7 @@ class DREAMPipeline:
         embs = self.encode([sentence_a, sentence_b])   # (2, D), normalised
         return float(np.dot(embs[0], embs[1]))
 
+    @torch.no_grad()
     def similarity_matrix(self, sentences: list[str]) -> np.ndarray:
         """
         Compute an N×N cosine similarity matrix.
@@ -185,7 +191,7 @@ class DREAMPipeline:
     def __repr__(self) -> str:
         return (
             f"DREAMPipeline("
-            f"backbone='{self.backbone[0].auto_model.config._name_or_path}', "
+            f"backbone='{self.backbone_name}', "
             f"dream={self.dream}, "
             f"device={self.device})"
         )

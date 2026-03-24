@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+import glob
 
 import numpy as np
 import pandas as pd
@@ -39,14 +40,19 @@ def load_sts_file(path: Path) -> tuple[list[str], list[str], list[float]]:
     """
     Load a STS file.  Expected columns: score \\t sentence1 \\t sentence2
     """
-    df = pd.read_csv(
-        path,
+    all_txt = glob.glob(f'{path}/*.txt')
+    dfs = [
+        pd.read_csv(
+        txt_path,
         sep="\t",
         header=None,
-        names=["score", "sent1", "sent2"],
+        names=["sent1", "sent2", "score"],
         on_bad_lines="skip",
-        dtype=str,
-    ).dropna()
+        dtype=str).dropna()
+        for txt_path in all_txt]
+    
+    df = pd.concat(dfs)
+
     scores = df["score"].astype(float).tolist()
     sent1  = df["sent1"].tolist()
     sent2  = df["sent2"].tolist()
@@ -93,7 +99,7 @@ def main() -> None:
     for sts_file in sorted(sts_dir.glob("STS.input.*.txt")):
         # Extract language pair from filename, e.g. "STS.input.track5.en-ar.txt" → "en-ar"
         pair = sts_file.stem.split(".")[-1]
-        gs_file = sts_file.parent / sts_file.name.replace("input", "gs")
+        gs_file = sts_file.parent / sts_file.name.replace("input", "gs") 
 
         if not gs_file.exists():
             print(f"  Skipping {sts_file.name} — gold standard not found.")

@@ -7,7 +7,7 @@ Backbone embeddings are pre-computed ONCE when the dataset is constructed and
 stored as float tensors in CPU memory.  The DataLoader then returns raw tensors
 — no backbone inference happens during training.
 
-This is the correct design because:
+This is the design because:
   1. The backbone is frozen; running it every epoch wastes compute.
   2. Training speed is limited by the tiny MLP heads, not by I/O.
 
@@ -41,6 +41,7 @@ import gc
 import glob
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -56,14 +57,14 @@ logger = logging.getLogger(__name__)
 # English is always the source language (ID 0).
 # Other IDs are assigned alphabetically by language name.
 DEFAULT_LANGUAGE_MAP: dict[str, int] = {
-    "en": 0,
-    "ar": 1,
-    "de": 2,
-    "es": 3,
-    "fr": 4,
-    "it": 5,
-    "nl": 6,
-    "tr": 7,
+    "en": 0,  # English
+    "ar": 1,  # Arabic
+    "de": 2,  # German
+    "es": 3,  # Spanish
+    "fr": 4,  # French
+    "it": 5,  # Italian
+    "nl": 6,  # Dutch
+    "tr": 7,  # Turkish
 }
 
 
@@ -123,8 +124,11 @@ class LanguagePairDataset(Dataset):
             raise ValueError(f"Empty or invalid TSV: {self.tsv_path}")
 
         logger.info(
-            f"  {self.tsv_path.name}: {len(data):,} pairs "
-            f"(src_lang={src_lang_id}, tgt_lang={tgt_lang_id})"
+            "  %s: %d pairs (src_lang=%d, tgt_lang=%d)",
+            self.tsv_path.name,
+            len(data),
+            src_lang_id,
+            tgt_lang_id,
         )
 
         # --- synonym lookup: src_id → set of known tgt_ids ------------------
@@ -267,6 +271,7 @@ class MultilingualDataset(Dataset):
         backbone:     Frozen SentenceTransformer for pre-computing embeddings.
         language_map: Mapping from ISO-639-1 language code to integer ID.
                       Source language is always ``"en"`` (ID 0).
+                      Defaults to DEFAULT_LANGUAGE_MAP when not provided.
         encode_batch: Batch size for backbone.encode().
     """
 
@@ -274,23 +279,33 @@ class MultilingualDataset(Dataset):
         self,
         data_dir: str | Path,
         backbone: SentenceTransformer,
-        language_map: dict[str, int] = DEFAULT_LANGUAGE_MAP,
+        language_map: Optional[dict[str, int]] = None,
         encode_batch: int = 64,
     ) -> None:
+        
+        if language_map is None:
+            language_map = DEFAULT_LANGUAGE_MAP.copy()
+
         data_dir = Path(data_dir)
         tsv_paths = sorted(glob.glob(str(data_dir / "*.tsv")))
 
         if not tsv_paths:
             raise FileNotFoundError(f"No TSV files found in {data_dir}")
 
-        logger.info(f"Loading {len(tsv_paths)} language pairs from {data_dir} …")
+        logger.info("Loading %d language pairs from %s …", len(tsv_paths), data_dir)
 
         self._datasets: list[LanguagePairDataset] = []
         for path in tsv_paths:
             tgt_code = _infer_tgt_lang_code(path)
+
             if tgt_code not in language_map:
-                logger.warning(f"  Skipping {path} — language code '{tgt_code}' not in language_map")
+                logger.warning(
+                    "  Skipping %s — language code '%s' not in language_map",
+                    path,
+                    tgt_code,
+                )
                 continue
+
             ds = LanguagePairDataset(
                 tsv_path=path,
                 backbone=backbone,
@@ -304,7 +319,8 @@ class MultilingualDataset(Dataset):
             raise ValueError("No usable language pairs found.")
 
         self._flat_index: list[tuple[int, int]] = self._build_flat_index()
-        logger.info(f"Total samples: {len(self):,}")
+
+        logger.info("Total samples: %d", len(self))
 
     # ------------------------------------------------------------------
 
@@ -355,25 +371,82 @@ def _encode(
     return vectors.cpu().float()
 
 
+_NAME_TO_ISO: dict[str, str] = {
+    "arabic":     "ar",  # Arabic
+    "german":     "de",  # German
+    "spanish":    "es",  # Spanish
+    "french":     "fr",  # French
+    "italian":    "it",  # Italian
+    "dutch":      "nl",  # Dutch
+    "turkish":    "tr",  # Turkish
+    "chinese":    "zh",  # Chinese
+    "japanese":   "ja",  # Japanese
+    "korean":     "ko",  # Korean
+    "portuguese": "pt",  # Portuguese
+    "russian":    "ru",  # Russian
+    "hindi":      "hi",  # Hindi
+    "vietnamese": "vi",  # Vietnamese
+    "thai":       "th",  # Thai
+    "polish":     "pl",  # Polish
+    "swedish":    "sv",  # Swedish
+    "norwegian":  "no",  # Norwegian
+    "danish":     "da",  # Danish
+    "finnish":    "fi",  # Finnish
+    "czech":      "cs",  # Czech
+    "hungarian":  "hu",  # Hungarian
+    "romanian":   "ro",  # Romanian
+    "nepali":     "ne",  # Nepali
+    "sinhala":    "si",  # Sinhala
+    "estonian":   "et",  # Estonian
+    "hebrew":     "he",  # Hebrew
+    "indonesian": "id",  # Indonesian
+    "malay":      "ms",  # Malay
+    "persian":    "fa",  # Persian
+    "ukrainian":  "uk",  # Ukrainian
+    "greek":      "el",  # Greek
+    "bulgarian":  "bg",  # Bulgarian
+    "catalan":    "ca",  # Catalan
+    "serbian":    "sr",  # Serbian
+    "slovak":     "sk",  # Slovak
+    "slovenian":  "sl",  # Slovenian
+    "latvian":    "lv",  # Latvian
+    "lithuanian": "lt",  # Lithuanian
+    "tagalog":    "tl",  # Tagalog
+    "bengali":    "bn",  # Bengali
+    "urdu":       "ur",  # Urdu
+    "swahili":    "sw",  # Swahili
+}
+
+
 def _infer_tgt_lang_code(tsv_path: str) -> str:
     """
-    Infer target language code from the TSV filename.
+    Infer the target language ISO-639-1 code from a TSV filename.
 
-    Expects filenames like:
-        tatoeba-en-de.tsv  → "de"
-        en-fr.tsv          → "fr"
-        Tatoeba.fr.tsv     → "fr"
+    Expected filename pattern (Tatoeba web export):
+        ``Sentence pairs in English-Arabic - 2026-03-12.tsv``  →  ``"ar"``
+        ``Sentence pairs in English-German - 2025-11-01.tsv``  →  ``"de"``
 
-    Falls back to the last two-letter segment found.
+    Raises:
+        ValueError: if the filename does not match the expected pattern
+                    or the language name is not in the lookup table.
     """
-    stem = Path(tsv_path).stem.lower()
-    parts = stem.replace(".", "-").replace("_", "-").split("-")
-    # skip "en" and common prefixes like "tatoeba"
-    for part in reversed(parts):
-        if len(part) == 2 and part.isalpha() and part != "en":
-            return part
-    # last resort: return last part
-    return parts[-1]
+    stem = Path(tsv_path).stem
+
+    m = re.search(r"English-(\w+)", stem, flags=re.IGNORECASE)
+    if not m:
+        raise ValueError(
+            f"Filename does not match expected pattern "
+            f"'Sentence pairs in English-<Language> - YYYY-MM-DD': {stem!r}"
+        )
+
+    lang_word = m.group(1).lower()
+    if lang_word not in _NAME_TO_ISO:
+        raise ValueError(
+            f"Unknown language name {lang_word!r} in filename {stem!r}. "
+            f"Add it to _NAME_TO_ISO if needed."
+        )
+
+    return _NAME_TO_ISO[lang_word]
 
 
 def free_backbone(backbone: SentenceTransformer) -> None:

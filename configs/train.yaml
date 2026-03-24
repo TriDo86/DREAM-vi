@@ -3,8 +3,8 @@
 # Override any value via CLI: python scripts/train.py --epochs 50 --lr 1e-5
 
 model:
-  backbone:      "sentence-transformers/LaBSE"   # swap for mBERT / XLM-R-large
-  embedding_dim: 768     # LaBSE / mBERT = 768, XLM-R-large = 1024
+  backbone:      "sentence-transformers/LaBSE"        #  "HIT-TMG/KaLM-embedding-multilingual-mini-instruct-v1.5"
+  embedding_dim: 768     # LaBSE / mBERT = 768, XLM-R-large = 1024, KaLM = 512
 
 data:
   train_dir:    "data/Tatoeba_Train"
@@ -17,10 +17,10 @@ trainer:
   epochs:        100
   learning_rate: 1.0e-4
   weight_decay:  0.0     # paper uses plain Adam with no WD
-  patience:      15      # early stopping patience (epochs)
+  patience:      10      # early stopping patience (epochs)
   min_delta:     1.0e-4
   checkpoint_dir: "checkpoints"
   save_every:    5       # save a rolling checkpoint every N epochs
   keep_last_k:   3       # keep only the K most recent rolling checkpoints
   device:        "cuda"  # "cuda" | "cpu" | "mps"
-  seed:          42
+  seed:          86

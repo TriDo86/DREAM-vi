@@ -28,9 +28,13 @@ import numpy as np
 import torch
 import yaml
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Anchor all relative paths to the project root
+# scripts/train.py → scripts → project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-from dream.dataset import MultilingualDataset, free_backbone
+sys.path.insert(0, str(_PROJECT_ROOT / "src"))
+
+from dream.dataset import DEFAULT_LANGUAGE_MAP, MultilingualDataset, free_backbone
 from dream.model   import DREAMModel
 from dream.trainer import Trainer, TrainerConfig
 from sentence_transformers import SentenceTransformer
@@ -58,9 +62,20 @@ def set_seed(seed: int) -> None:
     torch.backends.cudnn.benchmark     = False
 
 
-def load_yaml(path: str) -> dict:
+def load_yaml(path: Path) -> dict:
     with open(path) as f:
         return yaml.safe_load(f)
+
+
+def _resolve(p: str) -> Path:
+    """
+    Resolve a path string relative to the project root.
+    Absolute paths are returned unchanged.
+    """
+    resolved = Path(p)
+    if resolved.is_absolute():
+        return resolved
+    return (_PROJECT_ROOT / resolved).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +84,12 @@ def load_yaml(path: str) -> dict:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train the DREAM disentanglement model.")
-    p.add_argument("--config",  default="configs/train.yaml", help="Path to YAML config.")
+    # Default config path is anchored to _PROJECT_ROOT
+    p.add_argument(
+        "--config",
+        default=str(_PROJECT_ROOT / "configs" / "train.yaml"),
+        help="Path to YAML config.",
+    )
     p.add_argument("--resume",  default=None, help="Path to checkpoint to resume from.")
     # Optional CLI overrides (take priority over YAML)
     p.add_argument("--epochs",  type=int,   default=None)
@@ -97,20 +117,25 @@ def main() -> None:
     model_cfg = cfg.get("model", {})
     data_cfg  = cfg.get("data",  {})
 
+    # Resolve data and checkpoint paths relative to project root
+    data_cfg["train_dir"]          = _resolve(data_cfg["train_dir"])
+    data_cfg["val_dir"]            = _resolve(data_cfg["val_dir"])
+    trainer_cfg["checkpoint_dir"]  = str(_resolve(trainer_cfg.get("checkpoint_dir", "checkpoints")))
+
     tcfg = TrainerConfig(**trainer_cfg)
     set_seed(tcfg.seed)
 
     logger.info("=" * 60)
-    logger.info(f"Config: {tcfg}")
+    logger.info("Config: %s", tcfg)
     logger.info("=" * 60)
 
     # ── WandB init (un-comment to activate) ─────────────────────────────────
-    # import wandb
-    # wandb.init(project="dream-embed", config={**trainer_cfg, **model_cfg, **data_cfg})
+    import wandb
+    wandb.init(project="dream-embed", config={**trainer_cfg, **model_cfg, **data_cfg})
 
     # ── Backbone (used ONLY for pre-computing embeddings) ────────────────────
     backbone_name = model_cfg.get("backbone", "sentence-transformers/LaBSE")
-    logger.info(f"Loading backbone: {backbone_name}")
+    logger.info("Loading backbone: %s", backbone_name)
     backbone = SentenceTransformer(backbone_name)
 
     # ── Datasets ─────────────────────────────────────────────────────────────
@@ -133,7 +158,7 @@ def main() -> None:
     free_backbone(backbone)
 
     # ── DataLoaders ──────────────────────────────────────────────────────────
-    batch_size = data_cfg.get("batch_size", 512)
+    batch_size = data_cfg.get("batch_size", 64)
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
@@ -150,22 +175,20 @@ def main() -> None:
     )
 
     # ── Model ────────────────────────────────────────────────────────────────
-    embedding_dim = backbone.get_sentence_embedding_dimension() if hasattr(backbone, "get_sentence_embedding_dimension") else model_cfg.get("embedding_dim", 768)
-    # backbone was deleted — fall back to config value
     embedding_dim = model_cfg.get("embedding_dim", 768)
-    num_languages = len(train_ds._datasets) + 1  # +1 for English
+    num_languages = len(DEFAULT_LANGUAGE_MAP)   # single source of truth
 
     model = DREAMModel(
         embedding_dim=embedding_dim,
         num_languages=num_languages,
     )
-    logger.info(f"Model: {model}")
+    logger.info("Model: %s", model)
 
     # ── Trainer ──────────────────────────────────────────────────────────────
     trainer = Trainer(model, train_loader, val_loader, tcfg)
 
     if args.resume:
-        trainer.resume(args.resume)
+        trainer.resume(_resolve(args.resume))
 
     trainer.fit()
     logger.info("Training complete.")
