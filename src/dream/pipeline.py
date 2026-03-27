@@ -127,6 +127,7 @@ class DREAMPipeline:
         sentences: Union[str, list[str]],
         batch_size: int = 64,
         normalize: bool = True,
+        only_backbone = False
     ) -> np.ndarray:
         """
         Encode sentences into language-agnostic meaning embeddings.
@@ -142,6 +143,15 @@ class DREAMPipeline:
         if isinstance(sentences, str):
             sentences = [sentences]
 
+        if only_backbone:
+            return  self.backbone.encode(
+                sentences,
+                batch_size=batch_size,
+                convert_to_tensor=True,
+                normalize_embeddings=normalize,
+                show_progress_bar=len(sentences) > 256,
+                device=str(self.device)).cpu().float().numpy()
+        
         # Step 1: frozen backbone → raw sentence embeddings
         raw: torch.Tensor = self.backbone.encode(
             sentences,
@@ -156,9 +166,31 @@ class DREAMPipeline:
         meaning = self.dream.encode_meaning(raw, normalize=normalize)  # (N, D)
 
         return meaning.cpu().float().numpy()
+    
+    @torch.no_grad()
+    def dream_forward(self, 
+                    sentences: Union[str, list[str]],
+                    batch_size: int = 64) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        
+        # Step 1: frozen backbone → raw sentence embeddings
+        raw: torch.Tensor = self.backbone.encode(
+            sentences,
+            batch_size=batch_size,
+            convert_to_tensor=True,
+            normalize_embeddings=False,
+            show_progress_bar=len(sentences) > 256,
+            device=str(self.device),
+        )  # (N, D)
+
+        # Step 2: DREAM head → meaning sub-space
+        meaning, language, logits = self.dream.forward(raw)
+
+        to_cpu_ndarray = lambda tensor: tensor.cpu().float().numpy()
+        return to_cpu_ndarray(meaning), to_cpu_ndarray(language), to_cpu_ndarray(logits)
+        
 
     @torch.no_grad()
-    def similarity(self, sentence_a: str, sentence_b: str) -> float:
+    def similarity(self, sentence_a: str, sentence_b: str, only_backbone=False) -> float:
         """
         Cosine similarity between two sentences (cross-lingual aware).
 
@@ -168,11 +200,11 @@ class DREAMPipeline:
 
             score = pipe.similarity("The cat is on the mat.", "Le chat est sur le tapis.")
         """
-        embs = self.encode([sentence_a, sentence_b])   # (2, D), normalised
+        embs = self.encode([sentence_a, sentence_b], only_backbone=only_backbone)   # (2, D), normalised
         return float(np.dot(embs[0], embs[1]))
 
     @torch.no_grad()
-    def similarity_matrix(self, sentences: list[str]) -> np.ndarray:
+    def similarity_matrix(self, sentences: list[str], only_backbone=False) -> np.ndarray:
         """
         Compute an N×N cosine similarity matrix.
 
@@ -181,7 +213,7 @@ class DREAMPipeline:
         Returns:
             numpy array of shape ``(N, N)`` with values in [-1, 1].
         """
-        embs = self.encode(sentences)       # (N, D), normalised
+        embs = self.encode(sentences, only_backbone=only_backbone)       # (N, D), normalised
         return (embs @ embs.T).astype(np.float32)
 
     # ------------------------------------------------------------------
