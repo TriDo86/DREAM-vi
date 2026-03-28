@@ -25,12 +25,12 @@ MultilingualDataset
 Usage
 -----
     from dream.dataset import MultilingualDataset
-    from sentence_transformers import SentenceTransformer
+    from dream.backbone_factory import create_backbone
 
-    backbone = SentenceTransformer("sentence-transformers/LaBSE")
+    backbone = create_backbone("sentence-transformers/LaBSE")
     ds = MultilingualDataset("data/Tatoeba_Train", backbone=backbone)
     # free backbone from GPU memory after pre-computation
-    del backbone; torch.cuda.empty_cache()
+    free_backbone(backbone); del backbone
 
     loader = DataLoader(ds, batch_size=512, num_workers=4, pin_memory=True)
 """
@@ -47,9 +47,10 @@ from typing import Optional
 
 import pandas as pd
 import torch
-from sentence_transformers import SentenceTransformer
 from torch import Tensor
 from torch.utils.data import Dataset
+
+from .backbone import BackboneBase
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class LanguagePairDataset(Dataset):
 
     Args:
         tsv_path:     Path to the TSV file.
-        backbone:     Frozen SentenceTransformer used to pre-compute embeddings.
+        backbone:     BackboneBase instance used to pre-compute embeddings.
                       Pass None only for unit testing with synthetic data.
         src_lang_id:  Integer ID for the source language.
         tgt_lang_id:  Integer ID for the target language.
@@ -101,7 +102,7 @@ class LanguagePairDataset(Dataset):
     def __init__(
         self,
         tsv_path: str | Path,
-        backbone: Optional[SentenceTransformer],
+        backbone: Optional[BackboneBase],
         src_lang_id: int,
         tgt_lang_id: int,
         encode_batch: int = 64,
@@ -143,14 +144,12 @@ class LanguagePairDataset(Dataset):
 
         # --- pre-compute embeddings ------------------------------------------
         if backbone is not None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-
             src_df = data.drop_duplicates("src_id")[["src_id", "src"]]
-            self._src_vectors: Tensor = _encode(backbone, src_df["src"].tolist(), encode_batch, device)
+            self._src_vectors: Tensor = backbone.encode(src_df["src"].tolist(), batch_size=encode_batch)
             self._src_id2idx: dict[str, int] = {sid: i for i, sid in enumerate(src_df["src_id"].tolist())}
 
             tgt_df = data.drop_duplicates("tgt_id")[["tgt_id", "tgt"]]
-            self._tgt_vectors: Tensor = _encode(backbone, tgt_df["tgt"].tolist(), encode_batch, device)
+            self._tgt_vectors: Tensor = backbone.encode(tgt_df["tgt"].tolist(), batch_size=encode_batch)
             self._tgt_id2idx: dict[str, int] = {tid: i for i, tid in enumerate(tgt_df["tgt_id"].tolist())}
         else:
             # synthetic / test mode — caller must set _src_vectors etc. manually
@@ -268,7 +267,7 @@ class MultilingualDataset(Dataset):
 
     Args:
         data_dir:     Directory containing ``*.tsv`` files.
-        backbone:     Frozen SentenceTransformer for pre-computing embeddings.
+        backbone:     BackboneBase instance for pre-computing embeddings.
         language_map: Mapping from ISO-639-1 language code to integer ID.
                       Source language is always ``"en"`` (ID 0).
                       Defaults to DEFAULT_LANGUAGE_MAP when not provided.
@@ -278,7 +277,7 @@ class MultilingualDataset(Dataset):
     def __init__(
         self,
         data_dir: str | Path,
-        backbone: SentenceTransformer,
+        backbone: BackboneBase,
         language_map: Optional[dict[str, int]] = None,
         encode_batch: int = 64,
     ) -> None:
@@ -352,24 +351,6 @@ class MultilingualDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _encode(
-    backbone: SentenceTransformer,
-    sentences: list[str],
-    batch_size: int,
-    device: str,
-) -> Tensor:
-    """Encode sentences with the backbone and return a CPU float tensor."""
-    vectors = backbone.encode(
-        sentences,
-        batch_size=batch_size,
-        convert_to_tensor=True,
-        normalize_embeddings=False,
-        show_progress_bar=True,
-        device=device,
-    )
-    return vectors.cpu().float()
-
 
 _NAME_TO_ISO: dict[str, str] = {
     "arabic":     "ar",  # Arabic
@@ -449,10 +430,10 @@ def _infer_tgt_lang_code(tsv_path: str) -> str:
     return _NAME_TO_ISO[lang_word]
 
 
-def free_backbone(backbone: SentenceTransformer) -> None:
+def free_backbone(backbone: BackboneBase) -> None:
     """
-    Move the backbone to CPU and release GPU memory.
-    Call this after pre-computing all embeddings to reclaim VRAM for training.
+    Release backbone from memory after pre-computing all embeddings.
+    Call this after MultilingualDataset construction to reclaim VRAM.
 
     Example::
 
