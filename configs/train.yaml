@@ -2,10 +2,26 @@
 # All hyperparameters in one place.
 # Override any value via CLI: python scripts/train.py --epochs 50 --lr 1e-5
 
+
+# model:
+#   backbone: "sentence-transformers/LaBSE"   # trainer.checkpoint_dir = "checkpoints/labse"
+#   backbone_type: "st"
+#   embedding_dim: 768
+
 model:
-  backbone:      "FacebookAI/xlm-roberta-large"        #  "HIT-TMG/KaLM-embedding-multilingual-mini-instruct-v1.5"
-  backbone_type: "hf"    # "st" | "bge" | "hf" | "auto"
-  embedding_dim: 768     # LaBSE / mBERT = 768, XLM-R-large = 1024, KaLM = 512
+  backbone: "BAAI/bge-m3"                 # trainer.checkpoint_dir = "checkpoints/bgem3"
+  backbone_type: "bge"
+  embedding_dim: 1024
+
+# model:
+#   backbone: "FacebookAI/xlm-roberta-large" # trainer.checkpoint_dir = "checkpoints/xlmr"
+#   backbone_type: "hf"
+#   embedding_dim: 1024
+
+# model:
+#   backbone: "google-bert/bert-base-multilingual-cased" # trainer.checkpoint_dir = "checkpoints/mbert"
+#   backbone_type: "hf"
+#   embedding_dim: 768
 
 data:
   train_dir:    "data/Tatoeba_Train"
@@ -15,7 +31,7 @@ data:
   num_workers:  4
 
 trainer:
-  checkpoint_dir: "checkpoints/xmlr"
+  checkpoint_dir: "checkpoints/bgem3"
   epochs:        100
   learning_rate: 1.0e-4
   weight_decay:  0.0     # paper uses plain Adam with no WD

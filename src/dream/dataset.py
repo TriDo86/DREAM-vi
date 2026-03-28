@@ -154,8 +154,8 @@ class LanguagePairDataset(Dataset):
         else:
             # synthetic / test mode — caller must set _src_vectors etc. manually
             self._src_vectors = torch.empty(0)
-            self._tgt_vectors = torch.empty(0)
             self._src_id2idx  = {}
+            self._tgt_vectors = torch.empty(0)
             self._tgt_id2idx  = {}
 
         # --- build initial random pairs --------------------------------------
