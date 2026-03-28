@@ -53,6 +53,9 @@ class TrainerConfig:
     # ── reproducibility ──────────────────────────────────────────
     seed: int = 86
 
+    # ── wandb ────────────────────────────────────────────────────
+    use_wandb: bool = False   # set to True and configure wandb before training
+
     # ── early stopping ───────────────────────────────────────────
     patience:   int   = 15
     min_delta:  float = 1e-4
@@ -162,11 +165,11 @@ class Trainer:
             is_best = val_lc.total.item() < self._best_val_loss
             self._log(epoch, train_lc, val_lc, is_best=is_best)
 
-            # ── WandB (un-comment to activate) ──────────────────────────────
-            import wandb
-            wandb.log({"epoch": epoch,
-                       **train_lc.as_log_dict("train/"),
-                       **val_lc.as_log_dict("val/")})
+            if self.cfg.use_wandb:
+                import wandb
+                wandb.log({"epoch": epoch,
+                           **train_lc.as_log_dict("train/"),
+                           **val_lc.as_log_dict("val/")})
 
             if is_best:
                 self._best_val_loss = val_lc.total.item()

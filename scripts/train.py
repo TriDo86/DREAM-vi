@@ -37,7 +37,7 @@ sys.path.insert(0, str(_PROJECT_ROOT / "src"))
 from dream.dataset import DEFAULT_LANGUAGE_MAP, MultilingualDataset, free_backbone
 from dream.model   import DREAMModel
 from dream.trainer import Trainer, TrainerConfig
-from sentence_transformers import SentenceTransformer
+from dream.backbone_factory import create_backbone
 from torch.utils.data import DataLoader
 
 logging.basicConfig(
@@ -129,14 +129,20 @@ def main() -> None:
     logger.info("Config: %s", tcfg)
     logger.info("=" * 60)
 
-    # ── WandB init (un-comment to activate) ─────────────────────────────────
-    import wandb
-    wandb.init(project="dream-embed", config={**trainer_cfg, **model_cfg, **data_cfg})
+    # ── WandB init ───────────────────────────────────────────────────────────
+    if trainer_cfg.get("use_wandb", False):
+        import wandb
+        wandb.init(project="dream-embed", config={**trainer_cfg, **model_cfg, **data_cfg})
 
     # ── Backbone (used ONLY for pre-computing embeddings) ────────────────────
     backbone_name = model_cfg.get("backbone", "sentence-transformers/LaBSE")
-    logger.info("Loading backbone: %s", backbone_name)
-    backbone = SentenceTransformer(backbone_name)
+    backbone_type = model_cfg.get("backbone_type", "auto")
+    logger.info("Loading backbone: %s (type=%s)", backbone_name, backbone_type)
+    backbone = create_backbone(
+        backbone_name,
+        backbone_type=backbone_type,
+        device=torch.device(trainer_cfg.get("device", "cpu")),
+    )
 
     # ── Datasets ─────────────────────────────────────────────────────────────
     logger.info("Pre-computing training embeddings …")

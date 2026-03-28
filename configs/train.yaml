@@ -4,6 +4,7 @@
 
 model:
   backbone:      "FacebookAI/xlm-roberta-large"        #  "HIT-TMG/KaLM-embedding-multilingual-mini-instruct-v1.5"
+  backbone_type: "hf"    # "st" | "bge" | "hf" | "auto"
   embedding_dim: 768     # LaBSE / mBERT = 768, XLM-R-large = 1024, KaLM = 512
 
 data:
@@ -24,3 +25,4 @@ trainer:
   keep_last_k:   3       # keep only the K most recent rolling checkpoints
   device:        "cuda"  # "cuda" | "cpu" | "mps"
   seed:          86
+  use_wandb:     false   # set to true and run `wandb login` before training
