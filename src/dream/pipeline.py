@@ -28,14 +28,13 @@ from typing import Optional, Union
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sentence_transformers import SentenceTransformer
 
+from .backbone import BackboneBase
+from .backbone_factory import BackboneInput, create_backbone
 from .model import DREAMModel
 from .dataset import DEFAULT_LANGUAGE_MAP
 
 _NUM_LANGUAGES = len(DEFAULT_LANGUAGE_MAP)
-
-# Default backbone used during training
 _DEFAULT_BACKBONE = "sentence-transformers/LaBSE"
 
 
@@ -44,29 +43,39 @@ class DREAMPipeline:
     Frozen backbone + trained DREAMModel, packaged for inference.
 
     Args:
-        backbone_name:    HuggingFace model id of the sentence encoder.
+        backbone:         A model id string (auto-detected) or a BackboneBase
+                          instance for full control over quantization, pooling, etc.
         checkpoint_path:  Path to a ``dream_*.pt`` checkpoint.
                           If None, the DREAMModel is randomly initialised
                           (useful for testing the pipeline structure).
         device:           ``"cuda"`` | ``"cpu"`` | ``"mps"``.
                           Defaults to the best available device.
+        backbone_type:    ``"st"`` | ``"bge"`` | ``"hf"`` | ``"auto"``.
+                          Only used when backbone is a string.
+        backbone_kwargs:  Extra kwargs forwarded to the backbone adapter constructor.
     """
 
     def __init__(
         self,
-        backbone_name: str = _DEFAULT_BACKBONE,
+        backbone: BackboneInput = _DEFAULT_BACKBONE,
         checkpoint_path: Optional[Union[str, Path]] = None,
         device: Optional[str] = None,
+        backbone_type: str = "auto",
+        backbone_kwargs: Optional[dict] = None,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
 
         # ── Backbone (frozen) ─────────────────────────────────────────────
-        self.backbone_name = backbone_name
-        self.backbone =     (backbone_name, device=str(self.device))
+        self.backbone: BackboneBase = create_backbone(
+            backbone,
+            device=self.device,
+            backbone_type=backbone_type,
+            backbone_kwargs=backbone_kwargs,
+        )
         self.backbone.eval()
-        embedding_dim = self.backbone.get_sentence_embedding_dimension()
+        embedding_dim = self.backbone.embedding_dim
 
         # ── DREAM head ────────────────────────────────────────────────────
         num_languages = _NUM_LANGUAGES
@@ -83,8 +92,8 @@ class DREAMPipeline:
             )
             if ckpt_dim != embedding_dim:
                 raise ValueError(
-                    f"Backbone '{backbone_name}' has embedding_dim={embedding_dim}, "
-                    f"but checkpoint expects {ckpt_dim}.  Use the same backbone as during training."
+                    f"Backbone '{self.backbone.model_id}' has embedding_dim={embedding_dim}, "
+                    f"but checkpoint expects {ckpt_dim}. Use the same backbone as during training."
                 )
 
         self.dream = DREAMModel(embedding_dim, num_languages).to(self.device)
@@ -101,20 +110,33 @@ class DREAMPipeline:
     def from_pretrained(
         cls,
         checkpoint_path: Union[str, Path],
-        backbone_name: str = _DEFAULT_BACKBONE,
+        backbone: BackboneInput = _DEFAULT_BACKBONE,
         device: Optional[str] = None,
+        backbone_type: str = "auto",
+        backbone_kwargs: Optional[dict] = None,
     ) -> "DREAMPipeline":
         """
         Load a fully trained pipeline from a checkpoint file.
 
         Example::
 
+            # Default backbone
             pipe = DREAMPipeline.from_pretrained("checkpoints/dream_best.pt")
+
+            # Different backbone by string
+            pipe = DREAMPipeline.from_pretrained("checkpoints/dream_best.pt",
+                                                 backbone="BAAI/bge-m3")
+
+            # Custom backbone instance (quantized, etc.)
+            pipe = DREAMPipeline.from_pretrained("checkpoints/dream_best.pt",
+                                                 backbone=my_backbone_instance)
         """
         return cls(
-            backbone_name=backbone_name,
+            backbone=backbone,
             checkpoint_path=checkpoint_path,
             device=device,
+            backbone_type=backbone_type,
+            backbone_kwargs=backbone_kwargs,
         )
 
     # ------------------------------------------------------------------
@@ -144,23 +166,13 @@ class DREAMPipeline:
             sentences = [sentences]
 
         if only_backbone:
-            return  self.backbone.encode(
-                sentences,
-                batch_size=batch_size,
-                convert_to_tensor=True,
-                normalize_embeddings=normalize,
-                show_progress_bar=len(sentences) > 256,
-                device=str(self.device)).cpu().float().numpy()
-        
-        # Step 1: frozen backbone → raw sentence embeddings
+            raw = self.backbone.encode(sentences, batch_size=batch_size, normalize=normalize)
+            return raw.cpu().float().numpy()
+
+        # Step 1: frozen backbone → raw sentence embeddings (CPU float32)
         raw: torch.Tensor = self.backbone.encode(
-            sentences,
-            batch_size=batch_size,
-            convert_to_tensor=True,
-            normalize_embeddings=False,
-            show_progress_bar=len(sentences) > 256,
-            device=str(self.device),
-        )  # (N, D)
+            sentences, batch_size=batch_size, normalize=False
+        ).to(self.device)  # move to training device for DREAM head
 
         # Step 2: DREAM head → meaning sub-space
         meaning = self.dream.encode_meaning(raw, normalize=normalize)  # (N, D)
@@ -172,17 +184,12 @@ class DREAMPipeline:
                     sentences: Union[str, list[str]],
                     batch_size: int = 64) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         
-        # Step 1: frozen backbone → raw sentence embeddings
+        # Step 1: frozen backbone → raw sentence embeddings (CPU float32)
         raw: torch.Tensor = self.backbone.encode(
-            sentences,
-            batch_size=batch_size,
-            convert_to_tensor=True,
-            normalize_embeddings=False,
-            show_progress_bar=len(sentences) > 256,
-            device=str(self.device),
-        )  # (N, D)
+            sentences, batch_size=batch_size, normalize=False
+        ).to(self.device)  # move to training device for DREAM head
 
-        # Step 2: DREAM head → meaning sub-space
+        # Step 2: full DREAM forward pass
         meaning, language, logits = self.dream.forward(raw)
 
         to_cpu_ndarray = lambda tensor: tensor.cpu().float().numpy()
@@ -223,7 +230,7 @@ class DREAMPipeline:
     def __repr__(self) -> str:
         return (
             f"DREAMPipeline("
-            f"backbone='{self.backbone_name}', "
+            f"backbone='{self.backbone.model_id}', "
             f"dream={self.dream}, "
             f"device={self.device})"
         )
