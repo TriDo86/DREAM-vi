@@ -64,7 +64,7 @@ class DREAMPipeline:
 
         # ── Backbone (frozen) ─────────────────────────────────────────────
         self.backbone_name = backbone_name
-        self.backbone = SentenceTransformer(backbone_name, device=str(self.device))
+        self.backbone =     (backbone_name, device=str(self.device))
         self.backbone.eval()
         embedding_dim = self.backbone.get_sentence_embedding_dimension()
 
