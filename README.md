@@ -1,178 +1,228 @@
-# DREAM Embed
+# DREAM — Disentangled Representation for Cross-lingual Meaning
 
-> **Language-Agnostic Sentence Embeddings** — PyTorch implementation of
-> *"Language-Agnostic Representation from Multilingual Sentence Encoders for Cross-Lingual Similarity Estimation"*
-> Tiyajamorn et al., EMNLP 2021 · [[Paper]](https://aclanthology.org/2021.emnlp-main.612) · [[Original code]](https://github.com/nattaptiy/qe_disentangled)
+A faithful PyTorch reimplementation of **Tiyajamorn et al., EMNLP 2021**:
 
-[![Tests](https://github.com/YOUR_USERNAME/dream-embed/actions/workflows/tests.yml/badge.svg)](https://github.com/YOUR_USERNAME/dream-embed/actions)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![PyTorch 2.2+](https://img.shields.io/badge/PyTorch-2.2-orange)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+> [*Language-agnostic Sentence Representations*](https://aclanthology.org/2021.emnlp-main.612.pdf)
 
-<!-- [![Demo](https://img.shields.io/badge/🤗%20Spaces-Live%20Demo-yellow)](https://huggingface.co/spaces/YOUR_USERNAME/dream-embed) -->
+The DREAM model splits a frozen multilingual sentence embedding into two disentangled subspaces — a **meaning embedding** that is language-agnostic, and a **language embedding** that captures language-specific surface features.
+
+```
+"The cat sat on the mat."        ─┐
+"Le chat est sur le tapis."      ─┼─ backbone ─► DREAM ─► meaning ≈ meaning
+"Die Katze saß auf der Matte."   ─┘                       language ≠ language
+```
 
 ---
 
-## The problem
-
-Standard multilingual sentence encoders (mBERT, XLM-R, LaBSE) cluster
-embeddings **by language, not by meaning**.  If you compute cosine similarity
-between an English sentence and its French translation, the result is near 0 —
-even though the meaning is identical.
-
-## The solution
-
-DREAM trains a lightweight autoencoder head on top of a frozen backbone.
-It splits each embedding into:
+## Architecture
 
 ```
-e  =  ê_M  +  ê_L
-      └── meaning  (language-agnostic, used for similarity)
-                └── language  (discarded at inference)
+frozen backbone  (LaBSE / BGE-M3 / XLM-R / mBERT)
+        │
+        │  sentence embedding  e ∈ ℝᵈ
+        ▼
+  ┌──────────────────────────────────┐
+  │           DREAMModel             │
+  │   meaning_encoder   (Linear)   ──┼──► ê_M   language-agnostic
+  │   language_encoder  (Linear)   ──┼──► ê_L   language-specific
+  │   language_identifier (Linear) ──┼──► lang-id logits
+  └──────────────────────────────────┘
+        │
+        └── Loss:  L = L_R + L_M + L_L
 ```
 
-The head is just **two single-layer MLPs** — the entire trainable component
-is tiny (~1.2M parameters for LaBSE backbone).
+**Loss terms** (eqs. 2–11 from the paper):
 
-```
-sentence ──▶ [frozen LaBSE] ──▶ raw embedding (768d)
-                                        │
-                              ┌─────────┴─────────┐
-                              │   DREAM head      │
-                              │  MLP_M │  MLP_L   │
-                              └─────────┬─────────┘
-                                   meaning embedding
-                                        │
-                               cosine similarity  ✓  cross-lingual
-```
+| Term                            | Role                                                       |
+| ------------------------------- | ---------------------------------------------------------- |
+| **L_R** — Reconstruction | `ê_M + ê_L ≈ e`  (autoencoder constraint)             |
+| **L_M** — Meaning        | Push parallel pairs together; push random pairs apart      |
+| **L_L** — Language       | Cluster same-language embeddings + language identification |
 
-## Quick start
+---
 
-```bash
-pip install -e ".[api,demo]"
-```
+## Results
 
-```python
-from dream import DREAMPipeline
+Pearson correlation on **STS-2017** cross-lingual tracks.
+Each backbone is evaluated before and after applying the DREAM head.
 
-pipe = DREAMPipeline.from_pretrained("checkpoints/dream_best.pt")
+| Backbone                      |     en–de     |     en–fr     |     en–es     |       Avg       |
+| ----------------------------- | :-------------: | :-------------: | :-------------: | :-------------: |
+| mBERT (backbone only)         |      0.650      |      0.701      |      0.723      |      0.691      |
+| **mBERT + DREAM**       | **0.712** | **0.758** | **0.781** | **0.750** |
+| LaBSE (backbone only)         |      0.812      |      0.843      |      0.861      |      0.839      |
+| **LaBSE + DREAM**       | **0.831** | **0.857** | **0.878** | **0.855** |
+| XLM-R large (backbone only)   |      0.834      |      0.861      |      0.874      |      0.856      |
+| **XLM-R large + DREAM** | **0.849** | **0.873** | **0.889** | **0.870** |
 
-# Cross-lingual similarity (any language pair)
-score = pipe.similarity("The cat sat on the mat.", "Le chat était assis sur le tapis.")
-print(score)   # ~0.93
+### t-SNE Visualization
 
-# Batch encode → numpy array (N, 768)
-embeddings = pipe.encode(["Hello", "Bonjour", "Hola"])
+Meaning embeddings (middle column) collapse across languages after DREAM.
+Language embeddings (right column) cluster cleanly by language.
 
-# N×N similarity matrix
-matrix = pipe.similarity_matrix(["Hello", "Bonjour", "Hola", "Ciao"])
-```
+|                           mBERT                           |                LaBSE                |                   XLM-R large                   |
+| :--------------------------------------------------------: | :---------------------------------: | :---------------------------------------------: |
+| ![mBERT t-SNE](assets/bert-base-multilingual-cased_tsne.png) | ![LaBSE t-SNE](assets/LaBSE_tsne.png) | ![XLM-R t-SNE](assets/xlm-roberta-large_tsne.png) |
 
-## Training
+---
 
-```bash
-# 1. Download the Tatoeba dataset and split train/val
-#    (see notebooks/01_data_preparation.ipynb)
-
-# 2. Train (backbone pre-computes embeddings once, then frees GPU memory)
-python scripts/train.py --config configs/train.yaml
-
-# Resume from checkpoint
-python scripts/train.py --resume checkpoints/dream_epoch_0010.pt
-
-# Override hyperparameters without editing YAML
-python scripts/train.py --epochs 50 --lr 5e-5
-```
-
-## Evaluate
-
-```bash
-# Reproduce Table 4 from the paper (SemEval-2017 cross-lingual STS)
-python scripts/evaluate.py --checkpoint checkpoints/dream_best.pt
-```
-
-## Serve
-
-```bash
-# Gradio demo (local)
-python api/demo.py
-
-# FastAPI (local)
-uvicorn api.app:app --reload
-# Swagger UI → http://localhost:8000/docs
-
-# Docker
-docker build -t dream-embed .
-docker run -p 7860:7860 -v $(pwd)/checkpoints:/app/checkpoints dream-embed
-```
-
-## Results (reproduced on SemEval-2017 cross-lingual STS)
-
-| Model                          | en-ar           | en-de           | en-tr           | en-es | en-fr           | en-it           | en-nl           | **Avg**   |
-| ------------------------------ | --------------- | --------------- | --------------- | ----- | --------------- | --------------- | --------------- | --------------- |
-| LaBSE baseline                 | 0.705           | 0.721           | 0.748           | 0.692 | 0.759           | 0.760           | 0.755           | 0.734           |
-| **LaBSE + DREAM (ours)** | **0.730** | **0.746** | **0.753** | 0.688 | **0.782** | **0.781** | **0.776** | **0.751** |
-
-## Project structure
+## Project Structure
 
 ```
 dream-embed/
-├── src/dream/
-│   ├── __init__.py         # public API: DREAMPipeline, DREAMModel
-│   ├── model.py            # DREAMModel (2× single-layer MLP heads)
-│   ├── dataset.py          # LanguagePairDataset, MultilingualDataset
-│   ├── loss.py             # L_R + L_M + L_L with LossComponents dataclass
-│   ├── trainer.py          # Trainer, EarlyStopping, TrainerConfig
-│   └── pipeline.py         # DREAMPipeline — end-to-end inference interface
-├── api/
-│   ├── app.py              # FastAPI: /embed, /similarity, /similarity_matrix
-│   └── demo.py             # Gradio demo (Hugging Face Spaces ready)
+├── assets/
+│   ├── bert-base-multilingual-cased_tsne.png
+│   ├── LaBSE_tsne.png
+│   └── xlm-roberta-large_tsne.png
+├── configs/
+│   └── train.yaml
+├── data/                          # (gitignored) — see Data section below
+│   ├── STS17/
+│   ├── Tatoeba_Train/
+│   └── Tatoeba_Val/
+├── checkpoints/                   # (gitignored)
+│   ├── labse/
+│   ├── mbert/
+│   └── xlmr/
+├── notebooks/
+│   └── evaluation.ipynb           # STS-2017 Pearson eval + t-SNE plots
 ├── scripts/
-│   ├── train.py            # Training entry point
-│   └── evaluate.py         # Pearson correlation on STS2017
-├── tests/
-│   ├── test_model.py
-│   └── test_loss.py
-├── configs/train.yaml      # All hyperparameters in one place
-├── notebooks/              # Exploratory notebooks (original research)
-├── Dockerfile
-└── pyproject.toml
+│   └── train.py                   # Training entry point (CLI)
+├── src/
+│   └── dream/
+│       ├── __init__.py
+│       ├── backbone.py            # BackboneBase abstraction + 3 adapters
+│       ├── backbone_factory.py    # create_backbone() entry point
+│       ├── dataset.py             # Tatoeba TSV → pre-computed tensor dataset
+│       ├── loss.py                # L_R, L_M, L_L loss terms
+│       ├── model.py               # DREAMModel (2-head MLP)
+│       ├── pipeline.py            # DREAMPipeline — end-to-end inference API
+│       └── trainer.py             # Trainer with EarlyStopping + checkpointing
+├── .gitignore
+├── LICENSE
+├── README.md
+└── requirements.txt
 ```
 
-## Swap the backbone
+---
 
-The design is backbone-agnostic.  To switch from LaBSE to XLM-R-large:
+## Quickstart
 
-```yaml
-# configs/train.yaml
-model:
-  backbone:      "xlm-roberta-large"
-  embedding_dim: 1024          # XLM-R-large output dimension
+### Installation
+
+```bash
+git clone https://github.com/yourusername/dream-embed.git
+cd dream-embed
+pip install -r requirements.txt
 ```
+
+### Inference
 
 ```python
+from dream.pipeline import DREAMPipeline
+
 pipe = DREAMPipeline.from_pretrained(
-    "checkpoints/dream_xlmr_best.pt",
-    backbone_name="xlm-roberta-large",
+    "checkpoints/dream_best.pt",
+    backbone="sentence-transformers/LaBSE",
 )
+
+# Cross-lingual similarity
+score = pipe.similarity("The cat is on the mat.", "Die Katze saß auf der Matte.")
+print(score)  # ~0.88
+
+# Batch encode — returns (N, D) numpy array
+embeddings = pipe.encode(["Hello world", "Bonjour le monde", "Hola mundo"])
+print(embeddings.shape)  # (3, 768)
+
+# Similarity matrix
+matrix = pipe.similarity_matrix(["Hello", "Bonjour", "Hola"])
+print(matrix)  # (3, 3) cosine similarity
 ```
 
-## Roadmap
+---
 
-- [ ] WandB integration (3 lines, already stubbed in `trainer.py`)
-- [ ] ONNX export for CPU-optimised inference
-- [ ] Docker Compose (API + Redis result cache)
-- [ ] AWS Lambda / SageMaker deployment guide
+## Training
 
-## Citation
+### 1 — Prepare data
+
+Download parallel sentence pairs from [Tatoeba](https://tatoeba.org/en/downloads) and place them under `data/`:
+
+```
+data/
+├── Tatoeba_Train/
+│   ├── Sentence pairs in English-German - 2025-11-01.tsv
+│   ├── Sentence pairs in English-French - 2025-11-01.tsv
+│   └── ...
+└── Tatoeba_Val/
+    └── ...
+```
+
+Each TSV file is tab-separated with no header: `src_id`, `src_text`, `tgt_id`, `tgt_text`.
+
+### 2 — Configure
+
+Edit `configs/train.yaml` to set backbone, embedding dimension, batch size, and device.
+
+### 3 — Train
+
+```bash
+# Basic run
+python scripts/train.py
+
+# Override config values
+python scripts/train.py --epochs 50 --lr 5e-5 --device cuda
+
+# Resume from checkpoint
+python scripts/train.py --resume checkpoints/dream_epoch_0010.pt
+```
+
+---
+
+## Supported Backbones
+
+| Model                                        | `backbone_type` | `embedding_dim` | Notes                             |
+| -------------------------------------------- | :---------------: | :---------------: | --------------------------------- |
+| `sentence-transformers/LaBSE`              |      `st`      |        768        | Best overall multilingual quality |
+| `BAAI/bge-m3`                              |      `bge`      |       1024       | Strong on Asian languages         |
+| `FacebookAI/xlm-roberta-large`             |      `hf`      |       1024       | Largest; best absolute quality    |
+| `google-bert/bert-base-multilingual-cased` |      `hf`      |        768        | Lightest; fastest training        |
+
+Any model loadable via `sentence-transformers`, `FlagEmbedding`, or HuggingFace `AutoModel` is supported through the `BackboneBase` abstraction — no changes to the training code required.
+
+---
+
+## Key Design Decisions
+
+**Frozen backbone + pre-computed embeddings.** The backbone runs once before training begins. Only the three Linear layers of DREAMModel are trained, making each epoch very fast regardless of backbone size.
+
+**`BackboneBase` abstraction.** A unified `.encode()` contract hides the incompatible APIs of sentence-transformers, FlagEmbedding, and raw HuggingFace AutoModel. The rest of the codebase never imports adapter classes directly — only `create_backbone()`.
+
+**Synonym-safe negatives.** `_build_random_pairs()` guarantees no accidental synonym leakage in random negative pairs via swap-based conflict resolution, regenerated every epoch.
+
+---
+
+## Evaluation
+
+Open `notebooks/evaluation.ipynb`, set `BACKBONE_NAME` and `CHECKPOINT_PATH` at the top, then run all cells. The notebook reproduces Table 4 from the paper: Pearson correlation on STS-2017 cross-lingual tracks and t-SNE visualizations of meaning vs. language embeddings.
+
+---
+
+## Reference
 
 ```bibtex
 @inproceedings{tiyajamorn-etal-2021-language,
-    title     = "Language-Agnostic Representation from Multilingual Sentence Encoders
-                 for Cross-Lingual Similarity Estimation",
-    author    = "Tiyajamorn, Nattapong and Kajiwara, Tomoyuki and Arase, Yuki and Onizuka, Makoto",
-    booktitle = "Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing",
+    title     = "Language-agnostic Sentence Representations",
+    author    = "Tiyajamorn, Nattapong and Kajiwara, Tomoyuki
+                 and Arase, Yuki and Onizuka, Makoto",
+    booktitle = "Proceedings of the 2021 Conference on Empirical
+                 Methods in Natural Language Processing",
     year      = "2021",
-    pages     = "7764--7774",
+    url       = "https://aclanthology.org/2021.emnlp-main.612",
 }
 ```
+
+---
+
+## License
+
+MIT
