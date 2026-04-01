@@ -31,7 +31,7 @@ data:
   num_workers:  4
 
 trainer:
-  checkpoint_dir: "checkpoints/bgem3"
+  checkpoint_dir: "checkpoints/bgem3_vi"
   epochs:        100
   learning_rate: 1.0e-4
   weight_decay:  0.0     # paper uses plain Adam with no WD

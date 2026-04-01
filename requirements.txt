@@ -1,0 +1,22 @@
+# Core ML
+torch>=2.1.0
+numpy>=1.24.0
+
+# Backbone adapters (install what you need)
+sentence-transformers>=2.7.0       # for backbone_type="st" (LaBSE, paraphrase-*, etc.)
+FlagEmbedding>=1.2.5               # for backbone_type="bge" (BAAI/bge-m3, etc.)
+transformers>=4.40.0               # for backbone_type="hf" (XLM-R, mBERT, etc.)
+accelerate>=0.30.0                 # required by transformers for device_map
+
+# Data
+pandas>=2.0.0
+
+# Evaluation & notebooks
+scikit-learn>=1.4.0
+scipy>=1.12.0
+matplotlib>=3.8.0
+notebook>=7.0.0
+ipykernel>=6.29.0
+
+# Config
+pyyaml>=6.0

@@ -55,14 +55,17 @@ Each backbone is evaluated before and after applying the DREAM head.
 | XLM-R large (backbone only)   |      0.834      |      0.861      |      0.874      |      0.856      |
 | **XLM-R large + DREAM** | **0.849** | **0.873** | **0.889** | **0.870** |
 
-### t-SNE Visualization
+### Embedding Space Analysis via t-SNE
 
-Meaning embeddings (middle column) collapse across languages after DREAM.
-Language embeddings (right column) cluster cleanly by language.
+Columns represent three embedding spaces:
 
-|                           mBERT                           |                LaBSE                |                   XLM-R large                   |
-| :--------------------------------------------------------: | :---------------------------------: | :---------------------------------------------: |
-| ![mBERT t-SNE](assets/bert-base-multilingual-cased_tsne.png) | ![LaBSE t-SNE](assets/LaBSE_tsne.png) | ![XLM-R t-SNE](assets/xlm-roberta-large_tsne.png) |
+- The raw backbone (left)
+- The DREAM meaning subspace (center)
+- The DREAM language subspace (right).
+
+After disentanglement, meaning embeddings from different languages converge into a shared region, while language embeddings form distinct per-language clusters.
+
+![mBERT t-SNE](assets/bert-base-multilingual-cased_en-de_tsne.png)
 
 ---
 
@@ -76,7 +79,7 @@ dream-embed/
 │   └── xlm-roberta-large_tsne.png
 ├── configs/
 │   └── train.yaml
-├── data/                          # (gitignored) — see Data section below
+├── data/                          # (gitignored) — see "Training | 1 - Prepare data" section below
 │   ├── STS17/
 │   ├── Tatoeba_Train/
 │   └── Tatoeba_Val/
@@ -145,7 +148,7 @@ print(matrix)  # (3, 3) cosine similarity
 
 ### 1 — Prepare data
 
-Download parallel sentence pairs from [Tatoeba](https://tatoeba.org/en/downloads) and place them under `data/`:
+Download parallel sentence pairs from [Tatoeba](https://tatoeba.org/en/downloads), then split the data into training and validation sets according to your preferred ratio. Finally, organize the files under the data/ directory as follows:
 
 ```
 data/
@@ -211,13 +214,19 @@ Open `notebooks/evaluation.ipynb`, set `BACKBONE_NAME` and `CHECKPOINT_PATH` at 
 
 ```bibtex
 @inproceedings{tiyajamorn-etal-2021-language,
-    title     = "Language-agnostic Sentence Representations",
-    author    = "Tiyajamorn, Nattapong and Kajiwara, Tomoyuki
-                 and Arase, Yuki and Onizuka, Makoto",
-    booktitle = "Proceedings of the 2021 Conference on Empirical
-                 Methods in Natural Language Processing",
-    year      = "2021",
-    url       = "https://aclanthology.org/2021.emnlp-main.612",
+    title = "Language-agnostic Representation from Multilingual Sentence Encoders for Cross-lingual Similarity Estimation",
+    author = "Tiyajamorn, Nattapong  and
+      Kajiwara, Tomoyuki  and
+      Arase, Yuki  and
+      Onizuka, Makoto",
+    booktitle = "Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing",
+    month = nov,
+    year = "2021",
+    address = "Online and Punta Cana, Dominican Republic",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2021.emnlp-main.612",
+    pages = "7764--7774",
+    abstract = "We propose a method to distill a language-agnostic meaning embedding from a multilingual sentence encoder. By removing language-specific information from the original embedding, we retrieve an embedding that fully represents the sentence{'}s meaning. The proposed method relies only on parallel corpora without any human annotations. Our meaning embedding allows efficient cross-lingual sentence similarity estimation by simple cosine similarity calculation. Experimental results on both quality estimation of machine translation and cross-lingual semantic textual similarity tasks reveal that our method consistently outperforms the strong baselines using the original multilingual embedding. Our method consistently improves the performance of any pre-trained multilingual sentence encoder, even in low-resource language pairs where only tens of thousands of parallel sentence pairs are available.",
 }
 ```
 
