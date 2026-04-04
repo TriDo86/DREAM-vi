@@ -8,37 +8,37 @@
 #   backbone_type: "st"
 #   embedding_dim: 768
 
-model:
-  backbone: "BAAI/bge-m3"                 # trainer.checkpoint_dir = "checkpoints/bgem3"
-  backbone_type: "bge"
-  embedding_dim: 1024
+# model:
+#   backbone: "BAAI/bge-m3"                 # trainer.checkpoint_dir = "checkpoints/bgem3"
+#   backbone_type: "bge"
+#   embedding_dim: 1024
 
 # model:
 #   backbone: "FacebookAI/xlm-roberta-large" # trainer.checkpoint_dir = "checkpoints/xlmr"
 #   backbone_type: "hf"
 #   embedding_dim: 1024
 
-# model:
-#   backbone: "google-bert/bert-base-multilingual-cased" # trainer.checkpoint_dir = "checkpoints/mbert"
-#   backbone_type: "hf"
-#   embedding_dim: 768
+model:
+  backbone: "google-bert/bert-base-multilingual-cased" # trainer.checkpoint_dir = "checkpoints/mbert"
+  backbone_type: "hf"
+  embedding_dim: 768
 
 data:
   train_dir:    "data/Tatoeba_Train"
   val_dir:      "data/Tatoeba_Val"
   batch_size:   512
   encode_batch: 64       # batch size for backbone.encode() during pre-computation
-  num_workers:  4
+  num_workers:  4 
 
-trainer:
-  checkpoint_dir: "checkpoints/bgem3_vi"
+trainer: 
+  checkpoint_dir: "checkpoints/mbert-vi-lm2"
   epochs:        100
   learning_rate: 1.0e-4
   weight_decay:  0.0     # paper uses plain Adam with no WD
   patience:      10      # early stopping patience (epochs)
   min_delta:     1.0e-4
   save_every:    5       # save a rolling checkpoint every N epochs
-  keep_last_k:   3       # keep only the K most recent rolling checkpoints
+  keep_last_k:   3       # keep only the K most recent rolling c heckpoints  
   device:        "cuda"  # "cuda" | "cpu" | "mps"
   seed:          86
   use_wandb:     false   # set to true and run `wandb login` before training

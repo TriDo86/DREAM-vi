@@ -1,17 +1,18 @@
 """
 Loss functions for DREAM (Tiyajamorn et al., EMNLP 2021).
 
-Total loss:  L = L_R  +  L_M  +  L_L
+Total loss:  L = L_R + L_M + L_L
 
   L_R  — Reconstruction  (eq. 2):
          MSE between the original embedding and ê_M + ê_L.
 
   L_M  — Meaning         (eqs. 5-7):
-         L_x: parallel sentences → push meaning embeddings together.
-         L_m: random same-language sentences → push meaning embeddings apart.
+         L_x: parallel sentences    → push meaning embeddings together  (+1).
+         L_m: random sentences      → push meaning embeddings apart     (-1).
 
   L_L  — Language        (eqs. 8-11):
-         L_m^L: same-language embeddings → push language embeddings together.
+         L_m^L: same-language pairs    → push language embeddings together (+1).
+                cross-language pairs   → push language embeddings apart    (-1).
          L_i^L: cross-entropy language identification.
 """
 
@@ -25,7 +26,8 @@ import torch.nn.functional as F
 
 @dataclass(frozen=True)
 class LossComponents:
-    """Structured container for the three DREAM loss terms + total."""
+    """Structured container for the three DREAM loss terms and their total."""
+
     total:          torch.Tensor
     reconstruction: torch.Tensor
     meaning:        torch.Tensor
@@ -46,87 +48,113 @@ class LossComponents:
 # ---------------------------------------------------------------------------
 
 def reconstruction_loss(
-    e:   torch.Tensor,
-    e_m: torch.Tensor,
-    e_l: torch.Tensor,
+    original:  torch.Tensor,
+    meaning:   torch.Tensor,
+    language:  torch.Tensor,
 ) -> torch.Tensor:
     """
-    L_R  (eq. 2) — autoencoder reconstruction.
+    L_R (eq. 2) — autoencoder reconstruction.
 
-    Ensures that meaning + language embeddings sum back to the input.
+    Ensures that meaning + language embeddings sum back to the original
+    backbone embedding.
 
     Args:
-        e:   (B, D) original backbone embedding.
-        e_m: (B, D) meaning embedding.
-        e_l: (B, D) language embedding.
+        original:  (B, D) original backbone embedding.
+        meaning:   (B, D) meaning embedding  ê_M.
+        language:  (B, D) language embedding ê_L.
     """
-    return F.mse_loss(e_m + e_l, e)
+    return F.mse_loss(meaning + language, original)
 
 
 def meaning_loss(
-    s_m:      torch.Tensor,
-    t_m:      torch.Tensor,
-    rand_s_m: torch.Tensor,
-    rand_t_m: torch.Tensor,
+    src_meaning:      torch.Tensor,
+    tgt_meaning:      torch.Tensor,
+    rand_src_meaning: torch.Tensor,
+    rand_tgt_meaning: torch.Tensor,
 ) -> torch.Tensor:
     """
-    L_M  (eqs. 5-7) — disentangle meaning from language.
+    L_M (eqs. 5-7) — disentangle meaning from language.
 
-    L_x (eq. 6): parallel pair → minimise cosine distance between s_m and t_m.
-    L_m (eq. 7): random pair   → hinge loss, push apart when too similar.
+    L_x (eq. 6): parallel pair  → push meaning embeddings together (+1).
+    L_m (eq. 7): random pair    → push meaning embeddings apart    (-1).
 
     Args:
-        s_m:      (B, D) meaning embedding of source sentences (parallel).
-        t_m:      (B, D) meaning embedding of target sentences (parallel).
-        rand_s_m: (B, D) meaning embedding of random source sentences.
-        rand_t_m: (B, D) meaning embedding of random target sentences.
+        src_meaning:      (B, D) meaning embedding of source sentences (parallel pair).
+        tgt_meaning:      (B, D) meaning embedding of target sentences (parallel pair).
+        rand_src_meaning: (B, D) meaning embedding of random source sentences.
+        rand_tgt_meaning: (B, D) meaning embedding of random target sentences.
     """
-    # L_x: push parallel meanings together
-    L_x = (1.0 - F.cosine_similarity(s_m, t_m, dim=-1)).mean()
+    cos   = torch.nn.CosineEmbeddingLoss()
+    B     = src_meaning.size(0)
+    pos   = torch.ones(B, device=src_meaning.device)
+    neg   = torch.full((B,), -1.0, device=src_meaning.device)
 
-    # L_m: push random meanings apart (hinge at 0)
+    # L_x: parallel pair → together
+    L_x = cos(src_meaning, tgt_meaning, pos)
+
+    # L_m: random pair → apart
     L_m = (
-        F.relu(F.cosine_similarity(s_m, rand_s_m, dim=-1))
-        + F.relu(F.cosine_similarity(t_m, rand_t_m, dim=-1))
-    ).mean()
+        cos(src_meaning, rand_src_meaning, neg)
+      + cos(tgt_meaning, rand_tgt_meaning, neg)
+    )
 
     return L_x + L_m
 
 
 def language_loss(
-    s_l:        torch.Tensor,
-    t_l:        torch.Tensor,
-    rand_s_l:   torch.Tensor,
-    rand_t_l:   torch.Tensor,
-    s_logits:   torch.Tensor,
-    t_logits:   torch.Tensor,
-    src_lang_ids: torch.Tensor,
-    tgt_lang_ids: torch.Tensor,
+    src_language:      torch.Tensor,
+    tgt_language:      torch.Tensor,
+    rand_src_language: torch.Tensor,
+    rand_tgt_language: torch.Tensor,
+    src_logits:        torch.Tensor,
+    tgt_logits:        torch.Tensor,
+    src_lang_ids:      torch.Tensor,
+    tgt_lang_ids:      torch.Tensor,
 ) -> torch.Tensor:
     """
-    L_L  (eqs. 8-11) — preserve language-specific information.
+    L_L (eqs. 8-11) — preserve language-specific information.
 
-    L_m^L (eq. 9): same-language embeddings → push together (cosine distance).
-    L_i^L (eq. 11): cross-entropy for language identification.
+    L_m^L (eq. 9):
+        same-language pairs  → push language embeddings together (+1).
+        cross-language pairs → push language embeddings apart    (-1).
+    L_i^L (eq. 11): cross-entropy language identification.
 
     Args:
-        s_l, t_l:           (B, D) language embeddings of src / tgt sentences.
-        rand_s_l, rand_t_l: (B, D) language embeddings of random sentences.
-        s_logits, t_logits: (B, num_languages) raw lang-id logits.
-        src_lang_ids:       (B,) ground-truth language IDs for source.
-        tgt_lang_ids:       (B,) ground-truth language IDs for target.
+        src_language:      (B, D) language embedding of source sentences.
+        tgt_language:      (B, D) language embedding of target sentences.
+        rand_src_language: (B, D) language embedding of random same-language source sentences.
+        rand_tgt_language: (B, D) language embedding of random same-language target sentences.
+        src_logits:        (B, num_languages) raw logits for source language identification.
+        tgt_logits:        (B, num_languages) raw logits for target language identification.
+        src_lang_ids:      (B,) ground-truth language IDs for source sentences.
+        tgt_lang_ids:      (B,) ground-truth language IDs for target sentences.
     """
-    # L_m^L: push same-language embeddings together
-    L_m = (
-        2.0
-        - F.cosine_similarity(s_l, rand_s_l, dim=-1)
-        - F.cosine_similarity(t_l, rand_t_l, dim=-1)
-    ).mean()
+    cos   = torch.nn.CosineEmbeddingLoss()
+    B     = src_language.size(0)
+    pos   = torch.ones(B, device=src_language.device)
+    neg   = torch.full((B,), -1.0, device=src_language.device)
 
-    # L_i^L: language identification (classification)
+    # L_m^L — Language Embedding Loss (PullOnly)
+    # Pull same-language embeddings closer together.
+    # No push force between embeddings of different languages.
+    L_m = (
+        cos(src_language, rand_src_language, pos)   # en vs en → closer
+      + cos(tgt_language, rand_tgt_language, pos)   # de vs de → closer
+    )
+
+    # L_m^L — Language Embedding Loss (PullNPush)
+    # Pull same-language embeddings closer together (Pull)
+    # and push different-language embeddings further apart (Push).
+    # L_m = (
+    #     cos(src_language, rand_src_language, pos)   # en vs en → closer  (Pull)
+    #   + cos(tgt_language, rand_tgt_language, pos)   # de vs de → closer  (Pull)
+    #   + cos(src_language, tgt_language,      neg)   # en vs de → apart   (Push)
+    # )
+
+    # L_i^L: language identification
     L_i = (
-        F.cross_entropy(s_logits, src_lang_ids)
-        + F.cross_entropy(t_logits, tgt_lang_ids)
+        F.cross_entropy(src_logits, src_lang_ids)
+      + F.cross_entropy(tgt_logits, tgt_lang_ids)
     )
 
     return L_m + L_i
@@ -137,24 +165,24 @@ def language_loss(
 # ---------------------------------------------------------------------------
 
 def compute_loss(
-    # original backbone embeddings
-    e_src: torch.Tensor,
-    e_tgt: torch.Tensor,
-    # meaning branch
-    em_src: torch.Tensor,
-    em_tgt: torch.Tensor,
-    em_rand_src: torch.Tensor,
-    em_rand_tgt: torch.Tensor,
-    # language branch
-    el_src: torch.Tensor,
-    el_tgt: torch.Tensor,
-    el_rand_src: torch.Tensor,
-    el_rand_tgt: torch.Tensor,
-    # language-id logits + ground-truth labels
-    logits_src: torch.Tensor,
-    logits_tgt: torch.Tensor,
-    src_lang_ids: torch.Tensor,
-    tgt_lang_ids: torch.Tensor,
+    # Original backbone embeddings
+    src_original:      torch.Tensor,
+    tgt_original:      torch.Tensor,
+    # Meaning branch
+    src_meaning:       torch.Tensor,
+    tgt_meaning:       torch.Tensor,
+    rand_src_meaning:  torch.Tensor,
+    rand_tgt_meaning:  torch.Tensor,
+    # Language branch
+    src_language:      torch.Tensor,
+    tgt_language:      torch.Tensor,
+    rand_src_language: torch.Tensor,
+    rand_tgt_language: torch.Tensor,
+    # Language-id logits and ground-truth labels
+    src_logits:        torch.Tensor,
+    tgt_logits:        torch.Tensor,
+    src_lang_ids:      torch.Tensor,
+    tgt_lang_ids:      torch.Tensor,
 ) -> LossComponents:
     """
     Compute L = L_R + L_M + L_L and return all components.
@@ -162,10 +190,23 @@ def compute_loss(
     Returns a :class:`LossComponents` dataclass whose ``.total`` should be
     passed to ``.backward()``.
     """
-    L_R = reconstruction_loss(e_src, em_src, el_src) + reconstruction_loss(e_tgt, em_tgt, el_tgt)
-    L_M = meaning_loss(em_src, em_tgt, em_rand_src, em_rand_tgt)
-    L_L = language_loss(
-        el_src, el_tgt, el_rand_src, el_rand_tgt,
-        logits_src, logits_tgt, src_lang_ids, tgt_lang_ids,
+    L_R = (
+        reconstruction_loss(src_original, src_meaning, src_language)
+      + reconstruction_loss(tgt_original, tgt_meaning, tgt_language)
     )
-    return LossComponents(total=L_R + L_M + L_L, reconstruction=L_R, meaning=L_M, language=L_L)
+    L_M = meaning_loss(
+        src_meaning, tgt_meaning,
+        rand_src_meaning, rand_tgt_meaning,
+    )
+    L_L = language_loss(
+        src_language, tgt_language,
+        rand_src_language, rand_tgt_language,
+        src_logits, tgt_logits,
+        src_lang_ids, tgt_lang_ids,
+    )
+    return LossComponents(
+        total=L_R + L_M + L_L,
+        reconstruction=L_R,
+        meaning=L_M,
+        language=L_L,
+    )

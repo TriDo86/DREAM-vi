@@ -65,7 +65,7 @@ Columns represent three embedding spaces:
 
 After disentanglement, meaning embeddings from different languages converge into a shared region, while language embeddings form distinct per-language clusters.
 
-![mBERT t-SNE](assets/bert-base-multilingual-cased_en-de_tsne.png)
+![mBERT t-SNE](assets/bert-base-multilingual-cased_en-vi_tsne.png)
 
 ---
 
@@ -145,29 +145,78 @@ print(matrix)  # (3, 3) cosine similarity
 ---
 
 ## Training
-
 ### 1 — Prepare data
 
-Download parallel sentence pairs from [Tatoeba](https://tatoeba.org/en/downloads), then split the data into training and validation sets according to your preferred ratio. Finally, organize the files under the data/ directory as follows:
+**Step 1 — Download data**
+
+Go to [Tatoeba](https://tatoeba.org/en/downloads), download the sentence pairs for each language pair you want, and place all TSV files into `data/Tatoeba/`:
+
+```
+data/
+└── Tatoeba/
+    ├── Sentence pairs in English-Arabic - 2026-03-12.tsv
+    ├── Sentence pairs in English-Dutch - 2026-03-12.tsv
+    ├── Sentence pairs in English-French - 2026-03-12.tsv
+    ├── Sentence pairs in English-German - 2026-03-12.tsv
+    ├── Sentence pairs in English-Italian - 2026-03-12.tsv
+    ├── Sentence pairs in English-Spanish - 2026-03-12.tsv
+    └── Sentence pairs in English-Turkish - 2026-03-12.tsv
+```
+
+> The original paper uses the 7 language pairs above. You can add more — see the note on adding new languages below.
+
+**Step 2 — Split into train/val**
+
+Run `scripts/split_data.py` to split each TSV into training and validation sets:
+
+```bash
+# Default: 90% train / 10% val, reads from data/Tatoeba/, writes to data/Tatoeba_Train/ and data/Tatoeba_Val/
+python scripts/split_data.py
+
+# Custom split ratio and directories
+python scripts/split_data.py --src data/Tatoeba --train data/Tatoeba_Train --val data/Tatoeba_Val --val-ratio 0.1 --seed 86
+```
+
+After this step your `data/` directory should look like:
 
 ```
 data/
 ├── Tatoeba_Train/
-│   ├── Sentence pairs in English-German - 2025-11-01.tsv
-│   ├── Sentence pairs in English-French - 2025-11-01.tsv
+│   ├── Sentence pairs in English-Arabic - 2026-03-12.tsv
 │   └── ...
 └── Tatoeba_Val/
+    ├── Sentence pairs in English-Arabic - 2026-03-12.tsv
     └── ...
 ```
 
 Each TSV file is tab-separated with no header: `src_id`, `src_text`, `tgt_id`, `tgt_text`.
 
-### 2 — Configure
+**Adding a new language pair**
 
+The source language is hardcoded as English. To add a new `English-XXX` pair, open `src/dream/dataset.py` and update two dictionaries:
+
+1. `_NAME_TO_ISO` — maps the language name as it appears in the Tatoeba filename to its ISO-639-1 code:
+```python
+_NAME_TO_ISO: dict[str, str] = {
+    ...
+    "vietnamese": "vi",   # add the name exactly as it appears in the filename
+}
+```
+
+2. `DEFAULT_LANGUAGE_MAP` — assigns a unique integer ID to each language (used as the classification label by the model):
+```python
+DEFAULT_LANGUAGE_MAP: dict[str, int] = {
+    ...
+    "vi": 8,   # assign the next available integer ID
+}
+```
+
+> If your source language is not English, you will need to modify the dataset code manually.
+
+### 2 — Configure
 Edit `configs/train.yaml` to set backbone, embedding dimension, batch size, and device.
 
 ### 3 — Train
-
 ```bash
 # Basic run
 python scripts/train.py
@@ -191,6 +240,8 @@ python scripts/train.py --resume checkpoints/dream_epoch_0010.pt
 | `google-bert/bert-base-multilingual-cased` |      `hf`      |        768        | Lightest; fastest training        |
 
 Any model loadable via `sentence-transformers`, `FlagEmbedding`, or HuggingFace `AutoModel` is supported through the `BackboneBase` abstraction — no changes to the training code required.
+
+To use a different backbone, implement the `BackboneBase` interface defined in `src/dream/backbone.py`, then pass your instance directly to `create_backbone()` — it will be returned as-is.
 
 ---
 

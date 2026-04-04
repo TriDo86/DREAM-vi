@@ -7,7 +7,7 @@ Features
 - EarlyStopping with configurable patience and min_delta.
 - Checkpoint save/resume: stores model + optimizer + epoch + best val loss.
 - Rolling checkpoint pruning (keep only last K).
-- WandB integration: un-comment the three wandb lines to activate.
+- WandB integration: set use_wandb=True in TrainerConfig to activate.
 - Structured logging via Python's standard `logging` module.
 
 Usage
@@ -49,16 +49,15 @@ class TrainerConfig:
     learning_rate: float = 1e-4
     weight_decay:  float = 0.0    # paper uses plain Adam with no weight decay
 
-
     # ── reproducibility ──────────────────────────────────────────
     seed: int = 86
 
     # ── wandb ────────────────────────────────────────────────────
-    use_wandb: bool = False   # set to True and configure wandb before training
+    use_wandb: bool = False   # set to True and run `wandb login` before training
 
     # ── early stopping ───────────────────────────────────────────
-    patience:   int   = 15
-    min_delta:  float = 1e-4
+    patience:  int   = 15
+    min_delta: float = 1e-4
 
     # ── checkpointing ────────────────────────────────────────────
     checkpoint_dir: str = "checkpoints"
@@ -85,8 +84,8 @@ class EarlyStopping:
     def __init__(self, patience: int, min_delta: float = 1e-4) -> None:
         self.patience  = patience
         self.min_delta = min_delta
-        self._best: float = float("inf")
-        self._counter: int = 0
+        self._best:    float = float("inf")
+        self._counter: int   = 0
 
     @property
     def best(self) -> float:
@@ -98,7 +97,6 @@ class EarlyStopping:
             self._counter = 0
             return False
         self._counter += 1
-
         logger.debug(
             "EarlyStopping: no improvement for %d/%d epochs.",
             self._counter,
@@ -123,7 +121,7 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader   = val_loader
         self.cfg          = cfg
-        self.device = torch.device(cfg.device)
+        self.device       = torch.device(cfg.device)
         self.model.to(self.device)
 
         self.optimizer = torch.optim.Adam(
@@ -132,7 +130,10 @@ class Trainer:
             weight_decay=cfg.weight_decay,
         )
 
-        self.early_stopping = EarlyStopping(patience=cfg.patience, min_delta=cfg.min_delta)
+        self.early_stopping = EarlyStopping(
+            patience=cfg.patience,
+            min_delta=cfg.min_delta,
+        )
 
         self.ckpt_dir = Path(cfg.checkpoint_dir)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -167,15 +168,16 @@ class Trainer:
 
             if self.cfg.use_wandb:
                 import wandb
-                wandb.log({"epoch": epoch,
-                           **train_lc.as_log_dict("train/"),
-                           **val_lc.as_log_dict("val/")})
+                wandb.log({
+                    "epoch": epoch,
+                    **train_lc.as_log_dict("train/"),
+                    **val_lc.as_log_dict("val/"),
+                })
 
             if is_best:
                 self._best_val_loss = val_lc.total.item()
                 self._save(epoch, tag="best")
 
-            # Checkpoint: rolling save every N epochs
             if epoch % self.cfg.save_every == 0:
                 self._save(epoch, tag=f"epoch_{epoch:04d}")
                 self._prune_rolling()
@@ -196,7 +198,6 @@ class Trainer:
         self.optimizer.load_state_dict(ckpt["optimizer_state"])
         self._start_epoch   = ckpt["epoch"] + 1
         self._best_val_loss = ckpt.get("best_val_loss", float("inf"))
-
         logger.info(
             "Resumed from '%s' (epoch=%d, best_val=%.4f)",
             checkpoint_path,
@@ -213,22 +214,32 @@ class Trainer:
         accum = _Accumulator()
 
         for batch in self.train_loader:
-            e_src, e_tgt, rand_src, rand_tgt, src_lid, tgt_lid = [
-                t.to(self.device) for t in batch
-            ]
+            (src_original, tgt_original,
+             rand_src_original, rand_tgt_original,
+             src_lang_ids, tgt_lang_ids) = [t.to(self.device) for t in batch]
 
             self.optimizer.zero_grad()
 
-            em_src,  el_src,  logits_src  = self.model(e_src)
-            em_tgt,  el_tgt,  logits_tgt  = self.model(e_tgt)
-            em_rand_src, el_rand_src, _   = self.model(rand_src)
-            em_rand_tgt, el_rand_tgt, _   = self.model(rand_tgt)
+            src_meaning,      src_language,      src_logits      = self.model(src_original)
+            tgt_meaning,      tgt_language,      tgt_logits      = self.model(tgt_original)
+            rand_src_meaning, rand_src_language, _               = self.model(rand_src_original)
+            rand_tgt_meaning, rand_tgt_language, _               = self.model(rand_tgt_original)
 
             lc = compute_loss(
-                e_src, e_tgt,
-                em_src, em_tgt, em_rand_src, em_rand_tgt,
-                el_src, el_tgt, el_rand_src, el_rand_tgt,
-                logits_src, logits_tgt, src_lid, tgt_lid,
+                src_original=src_original,
+                tgt_original=tgt_original,
+                src_meaning=src_meaning,
+                tgt_meaning=tgt_meaning,
+                rand_src_meaning=rand_src_meaning,
+                rand_tgt_meaning=rand_tgt_meaning,
+                src_language=src_language,
+                tgt_language=tgt_language,
+                rand_src_language=rand_src_language,
+                rand_tgt_language=rand_tgt_language,
+                src_logits=src_logits,
+                tgt_logits=tgt_logits,
+                src_lang_ids=src_lang_ids,
+                tgt_lang_ids=tgt_lang_ids,
             )
 
             lc.total.backward()
@@ -243,20 +254,30 @@ class Trainer:
         accum = _Accumulator()
 
         for batch in self.val_loader:
-            e_src, e_tgt, rand_src, rand_tgt, src_lid, tgt_lid = [
-                t.to(self.device) for t in batch
-            ]
+            (src_original, tgt_original,
+             rand_src_original, rand_tgt_original,
+             src_lang_ids, tgt_lang_ids) = [t.to(self.device) for t in batch]
 
-            em_src,  el_src,  logits_src  = self.model(e_src)
-            em_tgt,  el_tgt,  logits_tgt  = self.model(e_tgt)
-            em_rand_src, el_rand_src, _   = self.model(rand_src)
-            em_rand_tgt, el_rand_tgt, _   = self.model(rand_tgt)
+            src_meaning,      src_language,      src_logits      = self.model(src_original)
+            tgt_meaning,      tgt_language,      tgt_logits      = self.model(tgt_original)
+            rand_src_meaning, rand_src_language, _               = self.model(rand_src_original)
+            rand_tgt_meaning, rand_tgt_language, _               = self.model(rand_tgt_original)
 
             lc = compute_loss(
-                e_src, e_tgt,
-                em_src, em_tgt, em_rand_src, em_rand_tgt,
-                el_src, el_tgt, el_rand_src, el_rand_tgt,
-                logits_src, logits_tgt, src_lid, tgt_lid,
+                src_original=src_original,
+                tgt_original=tgt_original,
+                src_meaning=src_meaning,
+                tgt_meaning=tgt_meaning,
+                rand_src_meaning=rand_src_meaning,
+                rand_tgt_meaning=rand_tgt_meaning,
+                src_language=src_language,
+                tgt_language=tgt_language,
+                rand_src_language=rand_src_language,
+                rand_tgt_language=rand_tgt_language,
+                src_logits=src_logits,
+                tgt_logits=tgt_logits,
+                src_lang_ids=src_lang_ids,
+                tgt_lang_ids=tgt_lang_ids,
             )
             accum.update(lc)
 
@@ -274,7 +295,6 @@ class Trainer:
         *,
         is_best: bool = False,
     ) -> None:
-        
         logger.info(
             "Epoch %4d | train=%.4f (R=%.3f M=%.3f L=%.3f) | val=%.4f%s",
             epoch,
@@ -294,13 +314,12 @@ class Trainer:
                 "model_state":     self.model.state_dict(),
                 "optimizer_state": self.optimizer.state_dict(),
                 "best_val_loss":   self._best_val_loss,
-                # store arch params so the checkpoint is self-contained
+                # Store arch params so the checkpoint is self-contained
                 "embedding_dim":   self.model.embedding_dim,
                 "num_languages":   self.model.num_languages,
             },
             path,
         )
-
         logger.info("  Checkpoint saved → %s", path)
         return path
 
@@ -317,7 +336,7 @@ class Trainer:
 # ---------------------------------------------------------------------------
 
 class _Accumulator:
-    """Accumulates LossComponents over batches, returns per-batch mean."""
+    """Accumulates LossComponents over batches and returns per-batch mean."""
 
     def __init__(self) -> None:
         self._total:          float = 0.0

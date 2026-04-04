@@ -1,11 +1,15 @@
 # Core ML
-torch>=2.1.0
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1+cu124
 numpy>=1.24.0
+
+# For CPU-only: replace the torch line with:
+# torch>=2.1.0
 
 # Backbone adapters (install what you need)
 sentence-transformers>=2.7.0       # for backbone_type="st" (LaBSE, paraphrase-*, etc.)
-FlagEmbedding>=1.2.5               # for backbone_type="bge" (BAAI/bge-m3, etc.)
-transformers>=4.40.0               # for backbone_type="hf" (XLM-R, mBERT, etc.)
+FlagEmbedding==1.2.5               # for backbone_type="bge" (BAAI/bge-m3, etc.)
+transformers==4.44.2               # for backbone_type="hf" (XLM-R, mBERT, etc.)
 accelerate>=0.30.0                 # required by transformers for device_map
 
 # Data

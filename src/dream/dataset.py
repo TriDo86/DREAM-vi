@@ -54,9 +54,24 @@ from .backbone import BackboneBase
 
 logger = logging.getLogger(__name__)
 
-# Default language → integer ID mapping used by the STS Tatoeba task.
-# English is always the source language (ID 0).
-# Other IDs are assigned alphabetically by language name.
+# Maps full language names (as they appear in Tatoeba filenames) to ISO-639-1 codes.
+# Used by _infer_tgt_lang_code() to parse filenames like "Sentence pairs in English-German - ...".
+_NAME_TO_ISO: dict[str, str] = {
+    "english": "en",  # English
+    "arabic":  "ar",  # Arabic
+    "german":  "de",  # German
+    "spanish": "es",  # Spanish
+    "french":  "fr",  # French
+    "italian": "it",  # Italian
+    "dutch":   "nl",  # Dutch
+    "turkish": "tr",  # Turkish
+
+    "vietnamese": "vi", # Vietnamese
+}
+
+# Maps ISO-639-1 language codes to integer IDs used by the model.
+# English (ID 0) is always the source language; targets are numbered 1–7.
+# To add a new language, append an entry here and in _NAME_TO_ISO above.
 DEFAULT_LANGUAGE_MAP: dict[str, int] = {
     "en": 0,  # English
     "ar": 1,  # Arabic
@@ -66,6 +81,8 @@ DEFAULT_LANGUAGE_MAP: dict[str, int] = {
     "it": 5,  # Italian
     "nl": 6,  # Dutch
     "tr": 7,  # Turkish
+
+    "vi": 8,  # Vietnamese (MultilingualDataset skips the En-Vi file if "vi" is not defined here)
 }
 
 
@@ -351,53 +368,6 @@ class MultilingualDataset(Dataset):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_NAME_TO_ISO: dict[str, str] = {
-    "arabic":     "ar",  # Arabic
-    "german":     "de",  # German
-    "spanish":    "es",  # Spanish
-    "french":     "fr",  # French
-    "italian":    "it",  # Italian
-    "dutch":      "nl",  # Dutch
-    "turkish":    "tr",  # Turkish
-    "chinese":    "zh",  # Chinese
-    "japanese":   "ja",  # Japanese
-    "korean":     "ko",  # Korean
-    "portuguese": "pt",  # Portuguese
-    "russian":    "ru",  # Russian
-    "hindi":      "hi",  # Hindi
-    "vietnamese": "vi",  # Vietnamese
-    "thai":       "th",  # Thai
-    "polish":     "pl",  # Polish
-    "swedish":    "sv",  # Swedish
-    "norwegian":  "no",  # Norwegian
-    "danish":     "da",  # Danish
-    "finnish":    "fi",  # Finnish
-    "czech":      "cs",  # Czech
-    "hungarian":  "hu",  # Hungarian
-    "romanian":   "ro",  # Romanian
-    "nepali":     "ne",  # Nepali
-    "sinhala":    "si",  # Sinhala
-    "estonian":   "et",  # Estonian
-    "hebrew":     "he",  # Hebrew
-    "indonesian": "id",  # Indonesian
-    "malay":      "ms",  # Malay
-    "persian":    "fa",  # Persian
-    "ukrainian":  "uk",  # Ukrainian
-    "greek":      "el",  # Greek
-    "bulgarian":  "bg",  # Bulgarian
-    "catalan":    "ca",  # Catalan
-    "serbian":    "sr",  # Serbian
-    "slovak":     "sk",  # Slovak
-    "slovenian":  "sl",  # Slovenian
-    "latvian":    "lv",  # Latvian
-    "lithuanian": "lt",  # Lithuanian
-    "tagalog":    "tl",  # Tagalog
-    "bengali":    "bn",  # Bengali
-    "urdu":       "ur",  # Urdu
-    "swahili":    "sw",  # Swahili
-}
-
 
 def _infer_tgt_lang_code(tsv_path: str) -> str:
     """

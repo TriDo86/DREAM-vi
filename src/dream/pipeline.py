@@ -165,8 +165,11 @@ class DREAMPipeline:
         if isinstance(sentences, str):
             sentences = [sentences]
 
+        # Backbone Only Eval:
         if only_backbone:
-            raw = self.backbone.encode(sentences, batch_size=batch_size, normalize=normalize)
+            raw = self.backbone.encode(sentences, normalize=False)
+            if normalize:
+                raw = F.normalize(raw, dim=-1)
             return raw.cpu().float().numpy()
 
         # Step 1: frozen backbone → raw sentence embeddings (CPU float32)
