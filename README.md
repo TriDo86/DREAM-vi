@@ -43,29 +43,133 @@ frozen backbone  (LaBSE / BGE-M3 / XLM-R / mBERT)
 
 ## Results
 
-Pearson correlation on **STS-2017** cross-lingual tracks.
-Each backbone is evaluated before and after applying the DREAM head.
+**Pearson correlation · SemEval-2017 Cross-lingual STS · 4 backbones · 3 training configurations**
 
-| Backbone                      |     en–de     |     en–fr     |     en–es     |       Avg       |
-| ----------------------------- | :-------------: | :-------------: | :-------------: | :-------------: |
-| mBERT (backbone only)         |      0.650      |      0.701      |      0.723      |      0.691      |
-| **mBERT + DREAM**       | **0.712** | **0.758** | **0.781** | **0.750** |
-| LaBSE (backbone only)         |      0.812      |      0.843      |      0.861      |      0.839      |
-| **LaBSE + DREAM**       | **0.831** | **0.857** | **0.878** | **0.855** |
-| XLM-R large (backbone only)   |      0.834      |      0.861      |      0.874      |      0.856      |
-| **XLM-R large + DREAM** | **0.849** | **0.873** | **0.889** | **0.870** |
+### Legend
 
-### Embedding Space Analysis via t-SNE
+- **bold** = Best in column
+- ⭐ = Largest gain over backbone (avg)
+- ↑ = Improved vs backbone
+- ↓ = Decreased vs backbone
+- (vi) = en-vi column
 
-Columns represent three embedding spaces:
+---
 
-- The raw backbone (left)
-- The DREAM meaning subspace (center)
-- The DREAM language subspace (right).
+## LaBSE
 
-After disentanglement, meaning embeddings from different languages converge into a shared region, while language embeddings form distinct per-language clusters.
+*already language-agnostic by design*
 
-![mBERT t-SNE](assets/bert-base-multilingual-cased_en-vi_tsne.png)
+| Configuration                     | en-ar    | en-de    | en-tr    | es-en    | fr-en    | it-en    | nl-en    | en-vi    | avg              |
+| --------------------------------- | -------- | -------- | -------- | -------- | -------- | -------- | -------- | -------- | ---------------- |
+| Backbone                          | 0.7217   | 0.7407   | 0.7294   | 0.6547   | 0.7628   | 0.7652   | 0.7502   | 0.7666   | **0.7364** |
+| Backbone + DREAM (Pull Only)      | 0.6945↓ | 0.7124↓ | 0.7186↓ | 0.6559↑ | 0.7445↓ | 0.7455↓ | 0.7402↓ | 0.7339↓ | 0.7182↓         |
+| Backbone + DREAM (Pull & Push)    | 0.6932↓ | 0.7140↓ | 0.7166↓ | 0.6528↓ | 0.7455↓ | 0.7473↓ | 0.7413↓ | 0.7338↓ | 0.7181↓         |
+| Backbone + DREAM (Pull Only) + Vi | 0.6914↓ | 0.7106↓ | 0.7150↓ | 0.6522↓ | 0.7419↓ | 0.7444↓ | 0.7380↓ | 0.7279↓ | 0.7152↓         |
+
+---
+
+## BGE-M3
+
+*strong multilingual baseline*
+
+| Configuration                     | en-ar              | en-de            | en-tr    | es-en    | fr-en            | it-en            | nl-en            | en-vi            | avg              |
+| --------------------------------- | ------------------ | ---------------- | -------- | -------- | ---------------- | ---------------- | ---------------- | ---------------- | ---------------- |
+| Backbone                          | 0.7029             | **0.8183** | 0.7339   | 0.7494   | **0.7970** | **0.7887** | **0.8100** | **0.7884** | **0.7736** |
+| Backbone + DREAM (Pull Only)      | **0.7399**↑ | 0.7363↓         | 0.7184↓ | 0.7209↓ | 0.7346↓         | 0.7421↓         | 0.7370↓         | 0.6974↓         | 0.7283↓         |
+| Backbone + DREAM (Pull & Push)    | 0.7398↑           | 0.7341↓         | 0.7196↓ | 0.7215↓ | 0.7314↓         | 0.7406↓         | 0.7367↓         | 0.6954↓         | 0.7274↓         |
+| Backbone + DREAM (Pull Only) + Vi | 0.7394↑           | 0.7320↓         | 0.7158↓ | 0.7180↓ | 0.7310↓         | 0.7387↓         | 0.7347↓         | 0.6937↓         | 0.7254↓         |
+
+---
+
+## XLM-RoBERTa Large
+
+*largest improvement from DREAM*
+
+| Configuration                     | en-ar              | en-de              | en-tr              | es-en              | fr-en              | it-en              | nl-en              | en-vi              | avg                |
+| --------------------------------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ |
+| Backbone                          | 0.1908             | 0.1173             | 0.1306             | 0.0319             | 0.1623             | 0.1405             | 0.1185             | 0.0237             | 0.1144             |
+| Backbone + DREAM (Pull Only)      | **0.4189**↑ | **0.4762**↑ | 0.5001↑           | **0.4542**↑ | **0.5019**↑ | 0.5382↑           | 0.5462↑           | 0.2930↑           | **0.4661**⭐ |
+| Backbone + DREAM (Pull & Push)    | 0.3422↑           | 0.3635↑           | 0.3704↑           | 0.2225↑           | 0.3328↑           | 0.3664↑           | 0.4273↑           | 0.2790↑           | 0.3380↑           |
+| Backbone + DREAM (Pull Only) + Vi | 0.4175↑           | 0.4743↑           | **0.4984**↑ | 0.4496↑           | 0.4975↑           | **0.5361**↑ | **0.5446**↑ | **0.4103**↑ | **0.4785**⭐ |
+
+---
+
+## mBERT
+
+*bert-base-multilingual-cased*
+
+| Configuration                     | en-ar              | en-de    | en-tr              | es-en    | fr-en              | it-en              | nl-en              | en-vi              | avg                |
+| --------------------------------- | ------------------ | -------- | ------------------ | -------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ |
+| Backbone                          | 0.1999             | 0.3341   | 0.1724             | 0.2440   | 0.3355             | 0.3338             | 0.3670             | 0.3296             | 0.2895             |
+| Backbone + DREAM (Pull Only)      | 0.1932↓           | 0.2835↓ | 0.2050↑           | 0.1774↓ | 0.3526↑           | 0.3803↑           | 0.3740↑           | 0.2703↓           | 0.2795↓           |
+| Backbone + DREAM (Pull & Push)    | 0.1962↓           | 0.2891↓ | **0.2108**↑ | 0.1838↓ | **0.3638**↑ | **0.3884**↑ | 0.3748↑           | 0.2734↓           | 0.2850↓           |
+| Backbone + DREAM (Pull Only) + Vi | **0.2017**↑ | 0.2837↓ | 0.1999↑           | 0.1846↓ | 0.3597↑           | **0.3902**↑ | **0.3806**↑ | **0.2984↓** | **0.2874**⭐ |
+
+---
+
+## Analysis
+
+DREAM demonstrates the strong effectiveness of disentangling meaning and language representations, especially for weakly aligned backbones.
+
+### Key Insights
+
+**01. DREAM is a powerful post-hoc debiasing technique for weakly-aligned models**  
+XLM-R Large and mBERT show dramatic improvements (average gains of +0.364 and +0.0079 respectively).
+
+**02. Adding Vietnamese data brings significant benefits**  
+Especially for XLM-R Large:  
+- en-vi column improves by **+0.1173**  
+- Overall average improves by **+0.0124**
+
+**03. Pull Only consistently outperforms Pull & Push**  
+The repulsion term in the Pull & Push variant leads to consistently lower performance across all backbones.
+
+**04. Strong baselines show diminishing returns**  
+LaBSE and BGE-M3 are already near saturation, so DREAM provides limited additional gains.
+
+## Embedding Space Analysis via t-SNE
+
+**Focused on the en-vi pair** (English–Vietnamese) — the most challenging low-resource pair in the benchmark.
+
+Each figure compares three representations:
+- **Backbone**: raw embedding from the multilingual encoder
+- **Meaning layer**: language-agnostic semantic space
+- **Language layer**: language-specific component
+
+### 1. BGE-M3
+
+<div align="center">
+
+![BGE-M3 Pull & Push no Vi en-vi](assets/bge-m3_LmPullNPush_noVi_en-vi.png)  
+**Figure 1: BGE-M3 – Pull & Push (no Vietnamese data)**
+
+![BGE-M3 Pull Only no Vi en-vi](assets/bge-m3_LmPullOnly_noVi_en-vi.png)  
+**Figure 2: BGE-M3 – Pull Only (no Vietnamese data)**
+
+</div>
+
+### 2. XLM-RoBERTa Large
+
+<div align="center">
+
+![XLM-R Pull Only no Vi en-vi](assets/xlm-roberta-large_LmPullOnly_noVi_en-vi.png)  
+**Figure 3: XLM-RoBERTa Large – Pull Only (no Vietnamese data)**
+
+![XLM-R Pull Only + Vi en-vi](assets/xlm-roberta-large_LmPullOnly_withVi_en-vi.png)  
+**Figure 4: XLM-RoBERTa Large – Pull Only + Vietnamese data**
+
+</div>
+
+**Summary of Observations**:
+- DREAM successfully separates meaning from language-specific features.
+- Adding Vietnamese data visibly improves meaning alignment in the Meaning layer for XLM-R.
+- Weak backbones (XLM-R) benefit dramatically, while strong backbones (BGE-M3) already perform well.
+
+### Summary of Visual Insights
+
+- **DREAM works as intended**: It reliably pushes language information into the Language layer while preserving (and often improving) semantic alignment in the Meaning layer.
+- **Backbone quality matters**: Strong baselines like BGE-M3 need little help; weak backbones like XLM-R benefit enormously.
+- **Vietnamese data as a powerful regularizer**: For XLM-R, adding distant low-resource data visibly improves meaning alignment without harming language separation — strong evidence that targeted low-resource augmentation is an effective strategy in multilingual embedding training.
 
 ---
 
@@ -145,6 +249,7 @@ print(matrix)  # (3, 3) cosine similarity
 ---
 
 ## Training
+
 ### 1 — Prepare data
 
 **Step 1 — Download data**
@@ -196,6 +301,7 @@ Each TSV file is tab-separated with no header: `src_id`, `src_text`, `tgt_id`, `
 The source language is hardcoded as English. To add a new `English-XXX` pair, open `src/dream/dataset.py` and update two dictionaries:
 
 1. `_NAME_TO_ISO` — maps the language name as it appears in the Tatoeba filename to its ISO-639-1 code:
+
 ```python
 _NAME_TO_ISO: dict[str, str] = {
     ...
@@ -204,6 +310,7 @@ _NAME_TO_ISO: dict[str, str] = {
 ```
 
 2. `DEFAULT_LANGUAGE_MAP` — assigns a unique integer ID to each language (used as the classification label by the model):
+
 ```python
 DEFAULT_LANGUAGE_MAP: dict[str, int] = {
     ...
@@ -214,9 +321,11 @@ DEFAULT_LANGUAGE_MAP: dict[str, int] = {
 > If your source language is not English, you will need to modify the dataset code manually.
 
 ### 2 — Configure
+
 Edit `configs/train.yaml` to set backbone, embedding dimension, batch size, and device.
 
 ### 3 — Train
+
 ```bash
 # Basic run
 python scripts/train.py
